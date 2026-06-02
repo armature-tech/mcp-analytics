@@ -1,0 +1,41 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createInstrumentedMockAutumnMcpServer } from "./instrumented-mock-autumn-mcp-server.js";
+
+const { server, autumn } = createInstrumentedMockAutumnMcpServer();
+const client = new Client({
+  name: "instrumented-mock-autumn-demo-client",
+  version: "0.0.0",
+});
+const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+await Promise.all([
+  server.connect(serverTransport),
+  client.connect(clientTransport),
+]);
+
+try {
+  const toolList = await client.listTools();
+  console.log("INSTRUMENTED TOOLS/LIST");
+  console.log(JSON.stringify(toolList, null, 2));
+
+  const toolCall = await client.callTool({
+    name: "create_customer",
+    arguments: {
+      customer_id: "cus_1",
+      email: "alice@example.com",
+      name: "Alice",
+      telemetry: {
+        intent: "Create a customer in the mock Autumn system.",
+      },
+    },
+  });
+  console.log("\nINSTRUMENTED TOOLS/CALL");
+  console.log(JSON.stringify(toolCall, null, 2));
+
+  console.log("\nMOCK AUTUMN CALLS");
+  console.log(JSON.stringify(autumn.calls, null, 2));
+} finally {
+  await client.close();
+  await server.close();
+}

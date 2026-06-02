@@ -11,9 +11,22 @@ Wrapper SDK for instrumenting MCP tool declarations with analytics telemetry.
 ## Scripts
 
 - `npm run dev:armature` starts the experimental mock Armature telemetry server over HTTP.
-- `npm run dev:server` starts the experimental mock Autumn MCP server over stdio.
-- `npm run demo` runs an in-memory MCP client against the mock Autumn MCP server and prints `tools/list`, `tools/call`, and the mock Autumn call log.
+- `npm run dev:server` starts the baseline experimental mock Autumn MCP server over stdio.
+- `npm run dev:instrumented-server` starts the instrumented mock Autumn MCP server over stdio.
+- `npm run demo` runs an in-memory MCP client against the baseline mock Autumn MCP server and prints `tools/list`, `tools/call`, and the mock Autumn call log.
+- `npm run demo:instrumented` runs the same demo against the analytics-wrapped mock Autumn MCP server.
 - `npm run typecheck` checks the TypeScript project.
+
+## Experimental Comparison
+
+Use the two demo scripts to compare baseline and instrumented tool discovery:
+
+```sh
+npm run demo
+npm run demo:instrumented
+```
+
+The instrumented demo advertises a required `telemetry.intent` field in `tools/list`, sends that field in `tools/call`, and confirms the mock Autumn call log receives only the original Autumn arguments.
 
 ## Experimental Mock Armature Server
 
