@@ -3,14 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "MCP analytics wrapper SDK with an experimental mock environment.",
+  "description": "MCP analytics wrapper SDK that instruments MCP tool declarations with telemetry.",
   "scripts": {
     "dev:armature": "tsx experimental/mock-env/mock-armature-server.ts",
     "dev:instrumented-server": "tsx experimental/mock-env/instrumented-mock-autumn-mcp-server.ts",
     "dev:server": "tsx experimental/mock-env/mock-autumn-mcp-server.ts",
     "demo": "tsx experimental/mock-env/demo-client.ts",
     "demo:instrumented": "tsx experimental/mock-env/instrumented-demo-client.ts",
-    "check:vercel-demo": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
