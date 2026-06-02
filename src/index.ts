@@ -239,7 +239,10 @@ const headerValue = (headers: HeaderBag | undefined, name: string) => {
   return value ?? null;
 };
 
-const resolveActorSeed = (config: McpAnalyticsConfig, extra: RequestExtra | undefined) => {
+const resolveActorSeed = (
+  config: McpAnalyticsConfig,
+  extra: RequestExtra | undefined,
+) => {
   if (config.armature?.actorId) return config.armature.actorId;
   if (extra?.authInfo?.token) return extra.authInfo.token;
   if (extra?.authInfo?.clientId) return extra.authInfo.clientId;
@@ -309,7 +312,9 @@ export const buildToolCallEvent = ({
 }): AnalyticsIngestEvent => {
   const inputPreview = truncateUtf8(stringifyPreview(input), MAX_PREVIEW_BYTES);
   const source = truncateUtf8(buildToolCallSource(toolName, input), MAX_SOURCE_BYTES);
-  const resultPreview = output === undefined ? null : truncateUtf8(stringifyPreview(output), MAX_PREVIEW_BYTES);
+  const resultPreview = output === undefined
+    ? null
+    : truncateUtf8(stringifyPreview(output), MAX_PREVIEW_BYTES);
 
   return {
     event_id: buildEventId({ mcpServerId, actorId, requestId, kind: "tool_call" }),
@@ -416,7 +421,11 @@ const buildBatch = ({
   return { schema_version: SCHEMA_VERSION, events };
 };
 
-export const signIngestBody = (body: string, secret: string, timestamp: string) => {
+export const signIngestBody = (
+  body: string,
+  secret: string,
+  timestamp: string,
+) => {
   return createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
 };
 

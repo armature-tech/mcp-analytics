@@ -93,7 +93,8 @@ export const createMockArmatureServer = (
 
     if (
       request.method === "POST" &&
-      (url.pathname === "/telemetry" || url.pathname === "/api/mcp-analytics/ingest")
+      (url.pathname === "/telemetry" ||
+        url.pathname === "/api/mcp-analytics/ingest")
     ) {
       try {
         const payload = await readJsonBody(request, maxBodyBytes);
