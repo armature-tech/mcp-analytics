@@ -43,7 +43,7 @@ sequenceDiagram
   actor Agent as Agent<br/>(Claude / Codex)
   participant MCP as Running MCP Server
   participant SDK as @armature/mcp-analytics
-  participant Telemetry as Async Telemetry Worker
+  participant Armature as Armature Telemetry Server
   participant AutumnCode as Autumn MCP Server Code
   participant AutumnAPI as Autumn API / SDK
 
@@ -56,17 +56,16 @@ sequenceDiagram
   SDK->>SDK: split args<br/>telemetry.intent vs Autumn args
   Note over SDK,AutumnCode: telemetry is never passed to Autumn
 
-  SDK--)Telemetry: enqueue tool_start<br/>{ tool, intent, agent, request_id }
-
   SDK->>AutumnCode: original handler<br/>stripped Autumn args only
   AutumnCode->>AutumnAPI: call Autumn<br/>stripped Autumn args only
   AutumnAPI-->>AutumnCode: Autumn result
   AutumnCode-->>SDK: tool result
 
-  SDK--)Telemetry: enqueue tool_finish<br/>{ request_id, status, duration }
-
   SDK-->>MCP: tool result
   MCP-->>Agent: tool result
+
+  SDK->>SDK: schedule telemetry emission<br/>with setImmediate
+  SDK--)Armature: POST /telemetry<br/>{ tool_name, telemetry, input, output, status, duration_ms }
 ```
 
 ## Example Shape
@@ -111,6 +110,27 @@ Original Autumn handler receives:
 
 Autumn receives only the original Autumn-compatible args. It never receives `telemetry`, `intent`, or agent metadata.
 
+Armature receives the analytics payload asynchronously:
+
+```ts
+{
+  type: "tool_call",
+  request_id: string,
+  tool_name: "create_customer",
+  telemetry: {
+    intent: string
+  },
+  input: {
+    customer_id: string,
+    email?: string,
+    name?: string
+  },
+  output: CallToolResult,
+  status: "success" | "error",
+  duration_ms: number
+}
+```
+
 ## SDK Usage Sketch
 
 ```ts
@@ -128,5 +148,6 @@ const server = createMcpAnalyticsServer(
 - `intent` is analytics-only data; it must never be passed to Autumn MCP handlers or Autumn APIs.
 - Autumn MCP server code remains the owner of Autumn behavior.
 - The SDK never calls Autumn directly.
-- Telemetry emission is asynchronous and must not block the tool call.
+- Telemetry emission is scheduled with `setImmediate` after the tool result is returned and must not block the tool call.
+- Armature receives telemetry, stripped tool input, tool output, status, duration, and request id.
 - There is no MCP-to-MCP middleware hop.

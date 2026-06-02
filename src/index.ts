@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -23,6 +24,12 @@ export type McpAnalyticsConfig = {
   telemetry?: {
     intent?: "required" | "optional";
   };
+  armature?: {
+    endpointUrl?: string;
+    enabled?: boolean;
+    emit?: TelemetryEmitter;
+    onError?: (error: unknown, event: ToolCallTelemetryEvent) => void;
+  };
 };
 
 export type TelemetryArgs = {
@@ -34,9 +41,31 @@ export type ExtractedToolArguments = {
   telemetry?: TelemetryArgs;
 };
 
+export type ToolCallTelemetryEvent = {
+  type: "tool_call";
+  request_id: string;
+  tool_name: string;
+  telemetry?: TelemetryArgs;
+  input: unknown;
+  output?: CallToolResult;
+  status: "success" | "error";
+  duration_ms: number;
+  error?: {
+    message: string;
+  };
+};
+
+export type TelemetryEmitter = (
+  event: ToolCallTelemetryEvent,
+) => void | Promise<void>;
+
 export const defaultMcpAnalyticsConfig = {
   telemetry: {
     intent: "required",
+  },
+  armature: {
+    endpointUrl: "http://127.0.0.1:8787/telemetry",
+    enabled: true,
   },
 } satisfies McpAnalyticsConfig;
 
@@ -116,6 +145,44 @@ export const extractTelemetryArguments = (
   };
 };
 
+export const postTelemetryEvent = async (
+  event: ToolCallTelemetryEvent,
+  endpointUrl = defaultMcpAnalyticsConfig.armature.endpointUrl,
+) => {
+  await fetch(endpointUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(event),
+  });
+};
+
+export const emitTelemetryEvent = (
+  event: ToolCallTelemetryEvent,
+  config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
+) => {
+  if (config.armature?.enabled === false) {
+    return;
+  }
+
+  const emit =
+    config.armature?.emit ??
+    (async (telemetryEvent: ToolCallTelemetryEvent) => {
+      const endpointUrl =
+        config.armature?.endpointUrl ??
+        defaultMcpAnalyticsConfig.armature.endpointUrl;
+
+      await postTelemetryEvent(telemetryEvent, endpointUrl);
+    });
+
+  setImmediate(() => {
+    void Promise.resolve(emit(event)).catch((error: unknown) => {
+      config.armature?.onError?.(error, event);
+    });
+  });
+};
+
 export const withMcpAnalytics = <ServerFactoryResult>(
   config: McpAnalyticsConfig,
   createServer: () => ServerFactoryResult,
@@ -144,12 +211,47 @@ export const withMcpAnalytics = <ServerFactoryResult>(
       argsOrExtra: unknown,
       maybeExtra?: unknown,
     ) => {
-      if (!originalHasInputSchema) {
-        return await cb(maybeExtra ?? argsOrExtra);
-      }
+      const startedAt = Date.now();
+      const requestId = randomUUID();
+      const { args, telemetry } = extractTelemetryArguments(argsOrExtra);
 
-      const { args } = extractTelemetryArguments(argsOrExtra);
-      return await cb(args, maybeExtra);
+      try {
+        const output = originalHasInputSchema
+          ? await cb(args, maybeExtra)
+          : await cb(maybeExtra ?? argsOrExtra);
+
+        emitTelemetryEvent(
+          {
+            type: "tool_call",
+            request_id: requestId,
+            tool_name: name,
+            telemetry,
+            input: args,
+            output,
+            status: "success",
+            duration_ms: Date.now() - startedAt,
+          },
+          config,
+        );
+        return output;
+      } catch (error) {
+        emitTelemetryEvent(
+          {
+            type: "tool_call",
+            request_id: requestId,
+            tool_name: name,
+            telemetry,
+            input: args,
+            status: "error",
+            duration_ms: Date.now() - startedAt,
+            error: {
+              message: error instanceof Error ? error.message : String(error),
+            },
+          },
+          config,
+        );
+        throw error;
+      }
     };
 
     return originalRegisterTool.call(

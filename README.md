@@ -26,7 +26,7 @@ npm run demo
 npm run demo:instrumented
 ```
 
-The instrumented demo advertises a required `telemetry.intent` field in `tools/list`, sends that field in `tools/call`, and confirms the mock Autumn call log receives only the original Autumn arguments.
+The instrumented demo advertises a required `telemetry.intent` field in `tools/list`, sends that field in `tools/call`, confirms the mock Autumn call log receives only the original Autumn arguments, and confirms mock Armature receives the async telemetry POST with the tool output.
 
 ## SDK Usage Sketch
 
@@ -52,9 +52,9 @@ Example:
 ```sh
 curl -X POST http://127.0.0.1:8787/telemetry \
   -H "Content-Type: application/json" \
-  -d '{"type":"tool_start","request_id":"req_1","tool":"create_customer","intent":"create test customer"}'
+  -d '{"type":"tool_call","request_id":"req_1","tool_name":"create_customer","telemetry":{"intent":"create test customer"},"input":{"customer_id":"cus_1"},"output":{"structuredContent":{"id":"cus_1"}},"status":"success","duration_ms":12}'
 ```
 
 ## Current Scope
 
-The SDK currently decorates registered MCP tool schemas with `telemetry.intent` and strips telemetry before original tool handlers run. The experimental environment exists so wrapper behavior can be developed and tested against mock Autumn and Armature services.
+The SDK currently decorates registered MCP tool schemas with `telemetry.intent`, strips telemetry before original tool handlers run, and asynchronously posts tool-call telemetry to Armature after the handler returns. The experimental environment exists so wrapper behavior can be developed and tested against mock Autumn and Armature services.
