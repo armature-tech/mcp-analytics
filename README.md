@@ -40,6 +40,16 @@ const server = createMcpAnalyticsServer(
 );
 ```
 
+## Vercel Demo Analytics Env
+
+The experimental Vercel MCP demo posts signed mcp-tester ingest batches when these Production environment variables are present:
+
+```sh
+ANALYTICS_INGEST_URL=https://app.armature.tech/api/mcp-analytics/ingest
+ANALYTICS_MCP_SERVER_ID=<mcp_tester_server_id>
+ANALYTICS_INGEST_SECRET=<ingest_token_secret>
+```
+
 ## Experimental Mock Armature Server
 
 `npm run dev:armature` starts an HTTP server on `http://127.0.0.1:8787`.

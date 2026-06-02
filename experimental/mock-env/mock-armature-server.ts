@@ -91,7 +91,11 @@ export const createMockArmatureServer = (
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/telemetry") {
+    if (
+      request.method === "POST" &&
+      (url.pathname === "/telemetry" ||
+        url.pathname === "/api/mcp-analytics/ingest")
+    ) {
       try {
         const payload = await readJsonBody(request, maxBodyBytes);
 
@@ -122,6 +126,7 @@ export const createMockArmatureServer = (
       error: "Not found.",
       endpoints: [
         "GET /health",
+        "POST /api/mcp-analytics/ingest",
         "POST /telemetry",
         "GET /telemetry",
         "DELETE /telemetry",

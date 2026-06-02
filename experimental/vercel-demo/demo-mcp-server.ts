@@ -56,11 +56,8 @@ export const createInstrumentedDemoMcpServer = () => {
       },
       armature: {
         enabled: true,
-        emit(event) {
-          console.log(JSON.stringify({
-            type: "experimental_vercel_mcp_telemetry",
-            event,
-          }));
+        onError(error) {
+          console.error("Failed to emit Armature MCP analytics", error);
         },
       },
     },
