@@ -51,11 +51,7 @@ export const createInstrumentedDemoMcpServer = () => {
   return createMcpAnalyticsServer(
     createDemoMcpServer,
     {
-      telemetry: {
-        intent: "required",
-      },
       armature: {
-        enabled: true,
         delivery: "await",
         timeoutMs: 15_000,
         onError(error) {
