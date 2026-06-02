@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createInstrumentedMockAutumnMcpServer } from "./instrumented-mock-autumn-mcp-server.js";
@@ -35,6 +36,14 @@ try {
 
   console.log("\nMOCK AUTUMN CALLS");
   console.log(JSON.stringify(autumn.calls, null, 2));
+
+  assert.deepStrictEqual(autumn.calls, [
+    {
+      customer_id: "cus_1",
+      email: "alice@example.com",
+      name: "Alice",
+    },
+  ]);
 } finally {
   await client.close();
   await server.close();
