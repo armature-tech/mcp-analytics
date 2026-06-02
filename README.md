@@ -6,6 +6,7 @@ Wrapper SDK for instrumenting MCP tool declarations with analytics telemetry.
 
 - `src/` is reserved for the wrapper SDK implementation.
 - `experimental/mock-env/` contains local mock servers and demo clients used to exercise the SDK design.
+- `experimental/vercel-demo/` contains a tiny Vercel-hosted MCP demo that exercises the SDK wrapper over Streamable HTTP.
 - `docs/` contains architecture notes and implementation planning material.
 
 ## Scripts
@@ -15,6 +16,7 @@ Wrapper SDK for instrumenting MCP tool declarations with analytics telemetry.
 - `npm run dev:instrumented-server` starts the instrumented mock Autumn MCP server over stdio.
 - `npm run demo` runs an in-memory MCP client against the baseline mock Autumn MCP server and prints `tools/list`, `tools/call`, and the mock Autumn call log.
 - `npm run demo:instrumented` runs the same demo against the analytics-wrapped mock Autumn MCP server.
+- `npm run check:vercel-demo` type-checks the experimental Vercel MCP demo.
 - `npm run typecheck` checks the TypeScript project.
 
 ## Experimental Comparison
