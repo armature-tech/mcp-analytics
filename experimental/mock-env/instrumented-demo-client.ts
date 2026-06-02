@@ -38,7 +38,9 @@ const { server, autumn } = createInstrumentedMockAutumnMcpServer(undefined, {
   ...defaultMcpAnalyticsConfig,
   armature: {
     ...defaultMcpAnalyticsConfig.armature,
-    endpointUrl: armatureTelemetryUrl,
+    endpointUrl: `${armatureTelemetryUrl.replace(/\/telemetry$/, "")}/api/mcp-analytics/ingest`,
+    ingestSecret: "mock-secret",
+    mcpServerId: "mock-autumn-mcp-server",
   },
 });
 const client = new Client({
@@ -65,6 +67,8 @@ try {
       name: "Alice",
       telemetry: {
         intent: "Create a customer in the mock Autumn system.",
+        context: "Exercise the wrapped mock Autumn MCP through the ingest batch format.",
+        frustration_level: "low",
       },
     },
   });
@@ -87,18 +91,18 @@ try {
   console.log(JSON.stringify(receivedTelemetry, null, 2));
 
   const payload = receivedTelemetry[0]?.payload;
-  assert.equal(payload?.type, "tool_call");
-  assert.equal(payload?.tool_name, "create_customer");
-  assert.equal(payload?.status, "success");
-  assert.deepStrictEqual(payload?.telemetry, {
-    intent: "Create a customer in the mock Autumn system.",
-  });
-  assert.deepStrictEqual(payload?.input, {
-    customer_id: "cus_1",
-    email: "alice@example.com",
-    name: "Alice",
-  });
-  assert.deepStrictEqual(payload?.output, toolCall);
+  assert.equal(payload?.schema_version, 1);
+  assert.ok(Array.isArray(payload?.events));
+  const event = payload?.events?.[0] as Record<string, unknown> | undefined;
+  assert.equal(event?.kind, "tool_call");
+  assert.equal(event?.mcp_server_id, "mock-autumn-mcp-server");
+  assert.equal(event?.ok, true);
+  assert.equal((event?.metadata as Record<string, unknown>)?.tool_name, "create_customer");
+  assert.equal((event?.metadata as Record<string, unknown>)?.intent, "Create a customer in the mock Autumn system.");
+  assert.equal((event?.metadata as Record<string, unknown>)?.context, "Exercise the wrapped mock Autumn MCP through the ingest batch format.");
+  assert.equal((event?.metadata as Record<string, unknown>)?.frustration_level, "low");
+  assert.match(String((event?.metadata as Record<string, unknown>)?.input_preview), /cus_1/);
+  assert.match(String(event?.result_preview), /alice@example.com/);
 } finally {
   await client.close();
   await server.close();

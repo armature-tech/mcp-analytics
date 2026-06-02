@@ -91,7 +91,10 @@ export const createMockArmatureServer = (
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/telemetry") {
+    if (
+      request.method === "POST" &&
+      (url.pathname === "/telemetry" || url.pathname === "/api/mcp-analytics/ingest")
+    ) {
       try {
         const payload = await readJsonBody(request, maxBodyBytes);
 
@@ -123,6 +126,7 @@ export const createMockArmatureServer = (
       endpoints: [
         "GET /health",
         "POST /telemetry",
+        "POST /api/mcp-analytics/ingest",
         "GET /telemetry",
         "DELETE /telemetry",
       ],
