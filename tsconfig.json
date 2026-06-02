@@ -11,5 +11,5 @@
     "declaration": true,
     "outDir": "dist"
   },
-  "include": ["src/**/*.ts", "experimental/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "experimental/**/*.ts", "api/**/*.ts", "tests/**/*.ts"]
 }
