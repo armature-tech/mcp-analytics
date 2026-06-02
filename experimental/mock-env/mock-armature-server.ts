@@ -126,8 +126,8 @@ export const createMockArmatureServer = (
       error: "Not found.",
       endpoints: [
         "GET /health",
-        "POST /api/mcp-analytics/ingest",
         "POST /telemetry",
+        "POST /api/mcp-analytics/ingest",
         "GET /telemetry",
         "DELETE /telemetry",
       ],
