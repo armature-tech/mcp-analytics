@@ -6,6 +6,8 @@
 
 It does not introduce a separate middleware server, does not call upstream `tools/list`, and does not forward telemetry to Autumn.
 
+Telemetry is visible to the agent and the analytics SDK only. Autumn MCP handlers and Autumn APIs receive only the original Autumn-compatible arguments.
+
 ## Design Sentence
 
 `@armature/mcp-analytics` instruments MCP tool declarations locally: it decorates advertised tool schemas and wraps handlers, without introducing a separate middleware server or upstream `tools/list` call.
@@ -18,7 +20,7 @@ sequenceDiagram
   participant SDK as @armature/mcp-analytics
   participant MCP as Running MCP Server
 
-  AutumnCode->>SDK: withMcpAnalytics(config, createAutumnOperationsMCPServer)
+  AutumnCode->>SDK: createMcpAnalyticsServer(createAutumnOperationsMCPServer)
   SDK->>SDK: enable instrumentation context
   SDK->>AutumnCode: call createAutumnOperationsMCPServer()
 
@@ -48,16 +50,16 @@ sequenceDiagram
   Agent->>MCP: tools/list
   MCP-->>Agent: Autumn tools include telemetry
 
-  Agent->>MCP: tools/call<br/>Autumn args + telemetry
+  Agent->>MCP: tools/call<br/>Autumn args + telemetry.intent
 
   MCP->>SDK: wrapped handler
-  SDK->>SDK: extract telemetry
-  SDK->>SDK: strip telemetry from args
+  SDK->>SDK: split args<br/>telemetry.intent vs Autumn args
+  Note over SDK,AutumnCode: telemetry is never passed to Autumn
 
   SDK--)Telemetry: enqueue tool_start<br/>{ tool, intent, agent, request_id }
 
-  SDK->>AutumnCode: original handler<br/>Autumn args only
-  AutumnCode->>AutumnAPI: call Autumn<br/>Autumn args only
+  SDK->>AutumnCode: original handler<br/>stripped Autumn args only
+  AutumnCode->>AutumnAPI: call Autumn<br/>stripped Autumn args only
   AutumnAPI-->>AutumnCode: Autumn result
   AutumnCode-->>SDK: tool result
 
@@ -82,6 +84,21 @@ Agent sees:
 }
 ```
 
+Analytics SDK extracts:
+
+```ts
+{
+  telemetry: {
+    intent: string
+  },
+  autumnArgs: {
+    customer_id: string,
+    email?: string,
+    name?: string
+  }
+}
+```
+
 Original Autumn handler receives:
 
 ```ts
@@ -97,14 +114,9 @@ Autumn receives only the original Autumn-compatible args. It never receives `tel
 ## SDK Usage Sketch
 
 ```ts
-import { withMcpAnalytics } from "@armature/mcp-analytics";
+import { createMcpAnalyticsServer } from "@armature/mcp-analytics";
 
-const server = withMcpAnalytics(
-  {
-    telemetry: {
-      intent: "required"
-    }
-  },
+const server = createMcpAnalyticsServer(
   () => createAutumnOperationsMCPServer()
 );
 ```
@@ -113,6 +125,7 @@ const server = withMcpAnalytics(
 
 - Telemetry is added at declaration time, before agents call `tools/list`.
 - Telemetry is removed at execution time, before the original Autumn handler runs.
+- `intent` is analytics-only data; it must never be passed to Autumn MCP handlers or Autumn APIs.
 - Autumn MCP server code remains the owner of Autumn behavior.
 - The SDK never calls Autumn directly.
 - Telemetry emission is asynchronous and must not block the tool call.

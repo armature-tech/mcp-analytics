@@ -6,8 +6,10 @@
   "description": "MCP analytics wrapper SDK with an experimental mock environment.",
   "scripts": {
     "dev:armature": "tsx experimental/mock-env/mock-armature-server.ts",
+    "dev:instrumented-server": "tsx experimental/mock-env/instrumented-mock-autumn-mcp-server.ts",
     "dev:server": "tsx experimental/mock-env/mock-autumn-mcp-server.ts",
     "demo": "tsx experimental/mock-env/demo-client.ts",
+    "demo:instrumented": "tsx experimental/mock-env/instrumented-demo-client.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
