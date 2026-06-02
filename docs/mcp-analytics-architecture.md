@@ -61,10 +61,11 @@ sequenceDiagram
   AutumnAPI-->>AutumnCode: Autumn result
   AutumnCode-->>SDK: tool result
 
-  SDK--)Armature: POST /telemetry<br/>{ tool_name, telemetry, input, output, status, duration_ms }
-
   SDK-->>MCP: tool result
   MCP-->>Agent: tool result
+
+  SDK->>SDK: schedule telemetry emission<br/>with setImmediate
+  SDK--)Armature: POST /telemetry<br/>{ tool_name, telemetry, input, output, status, duration_ms }
 ```
 
 ## Example Shape
@@ -147,6 +148,6 @@ const server = createMcpAnalyticsServer(
 - `intent` is analytics-only data; it must never be passed to Autumn MCP handlers or Autumn APIs.
 - Autumn MCP server code remains the owner of Autumn behavior.
 - The SDK never calls Autumn directly.
-- Telemetry emission is an asynchronous POST to Armature and must not block the tool call.
+- Telemetry emission is scheduled with `setImmediate` after the tool result is returned and must not block the tool call.
 - Armature receives telemetry, stripped tool input, tool output, status, duration, and request id.
 - There is no MCP-to-MCP middleware hop.

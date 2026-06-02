@@ -176,8 +176,10 @@ export const emitTelemetryEvent = (
       await postTelemetryEvent(telemetryEvent, endpointUrl);
     });
 
-  void Promise.resolve(emit(event)).catch((error: unknown) => {
-    config.armature?.onError?.(error, event);
+  setImmediate(() => {
+    void Promise.resolve(emit(event)).catch((error: unknown) => {
+      config.armature?.onError?.(error, event);
+    });
   });
 };
 
