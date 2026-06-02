@@ -1,0 +1,22 @@
+{
+  "name": "@armature/mcp-analytics",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Testing sandbox for an MCP analytics SDK.",
+  "scripts": {
+    "dev:server": "tsx src/testing/autumn-test-server.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.8"
+  }
+}
