@@ -1,13 +1,37 @@
-# Mock Autumn MCP Server
+# MCP Analytics
 
-Minimal TypeScript test environment with a mock Autumn MCP server.
+Wrapper SDK for instrumenting MCP tool declarations with analytics telemetry.
+
+## Layout
+
+- `src/` is reserved for the wrapper SDK implementation.
+- `experimental/mock-env/` contains local mock servers and demo clients used to exercise the SDK design.
+- `docs/` contains architecture notes and implementation planning material.
 
 ## Scripts
 
-- `npm run dev:server` starts the mock Autumn MCP server over stdio.
-- `npm run demo` runs an in-memory MCP client against the mock server and prints `tools/list`, `tools/call`, and the mock Autumn call log.
+- `npm run dev:armature` starts the experimental mock Armature telemetry server over HTTP.
+- `npm run dev:server` starts the experimental mock Autumn MCP server over stdio.
+- `npm run demo` runs an in-memory MCP client against the mock Autumn MCP server and prints `tools/list`, `tools/call`, and the mock Autumn call log.
 - `npm run typecheck` checks the TypeScript project.
+
+## Experimental Mock Armature Server
+
+`npm run dev:armature` starts an HTTP server on `http://127.0.0.1:8787`.
+
+- `GET /health` returns a readiness check.
+- `POST /telemetry` accepts a JSON object payload and stores it in memory.
+- `GET /telemetry` returns all received telemetry payloads.
+- `DELETE /telemetry` clears the in-memory telemetry log.
+
+Example:
+
+```sh
+curl -X POST http://127.0.0.1:8787/telemetry \
+  -H "Content-Type: application/json" \
+  -d '{"type":"tool_start","request_id":"req_1","tool":"create_customer","intent":"create test customer"}'
+```
 
 ## Current Scope
 
-This repo intentionally contains only the mock Autumn MCP test environment. There is no analytics wrapper, plan document, or SDK implementation here.
+The SDK implementation has not been added yet. The experimental environment exists so wrapper behavior can be developed and tested against mock Autumn and Armature services.

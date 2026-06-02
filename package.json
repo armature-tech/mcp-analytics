@@ -1,12 +1,13 @@
 {
-  "name": "@armature/mock-autumn-mcp-server",
+  "name": "@armature/mcp-analytics",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Minimal TypeScript test environment with a mock Autumn MCP server.",
+  "description": "MCP analytics wrapper SDK with an experimental mock environment.",
   "scripts": {
-    "dev:server": "tsx src/mock-autumn-mcp-server.ts",
-    "demo": "tsx src/demo-client.ts",
+    "dev:armature": "tsx experimental/mock-env/mock-armature-server.ts",
+    "dev:server": "tsx experimental/mock-env/mock-autumn-mcp-server.ts",
+    "demo": "tsx experimental/mock-env/demo-client.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
