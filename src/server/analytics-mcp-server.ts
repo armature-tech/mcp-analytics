@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
+import {
+	CallToolRequestSchema,
+	ErrorCode,
+	ListToolsRequestSchema,
+	McpError,
+	type CallToolResult,
+	type Tool,
+} from "@modelcontextprotocol/sdk/types.js";
 import { z, type ZodObject, type ZodRawShape, type ZodTypeAny } from "zod";
 
 export type TelemetryMode = "required" | "optional";
@@ -40,6 +48,7 @@ type ToolHandler<Args> = (args: Args) => Promise<CallToolResult> | CallToolResul
 type RegisteredTool = {
   originalSchema: ZodObject<ZodRawShape>;
   decoratedSchema: ZodObject<ZodRawShape>;
+  advertisedTool: Tool;
   handler: ToolHandler<unknown>;
 };
 
@@ -92,7 +101,7 @@ export class BoundedTelemetryQueue {
 }
 
 export type AnalyticsMcpServer = {
-	readonly mcp: McpServer;
+	readonly mcp: Server;
 	readonly telemetryQueue: BoundedTelemetryQueue;
 	registerTool<Shape extends ZodRawShape>(
 		name: string,
@@ -107,7 +116,10 @@ export type AnalyticsMcpServer = {
 export function createAnalyticsMcpServer(
   config: AnalyticsServerConfig,
 ): AnalyticsMcpServer {
-  const mcp = new McpServer({ name: config.name, version: config.version });
+  const mcp = new Server(
+    { name: config.name, version: config.version },
+    { capabilities: { tools: {} } },
+  );
   const telemetryQueue = new BoundedTelemetryQueue(config.queue);
   const tools = new Map<string, RegisteredTool>();
 
@@ -127,22 +139,19 @@ export function createAnalyticsMcpServer(
         toolConfig.inputSchema,
         config.telemetry.intent,
       );
+      const advertisedTool = buildAdvertisedTool({
+        name,
+        title: toolConfig.title,
+        description: toolConfig.description,
+        decoratedSchema,
+      });
 
       tools.set(name, {
         originalSchema: toolConfig.inputSchema,
         decoratedSchema,
+        advertisedTool,
         handler: handler as ToolHandler<unknown>,
       });
-
-      mcp.registerTool(
-        name,
-        {
-          title: toolConfig.title,
-          description: toolConfig.description,
-          inputSchema: decoratedSchema,
-        },
-        async (args) => facade.callTool(name, args),
-      );
     },
     async callTool(name, rawArgs) {
       const tool = tools.get(name);
@@ -216,8 +225,43 @@ export function createAnalyticsMcpServer(
     },
   };
 
+  mcp.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: Array.from(tools.values(), (tool) => tool.advertisedTool),
+  }));
+
+  mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
+    try {
+      return await facade.callTool(
+        request.params.name,
+        request.params.arguments ?? {},
+      );
+    } catch (error) {
+      if (error instanceof ToolValidationError) {
+        throw new McpError(ErrorCode.InvalidParams, error.message);
+      }
+      throw error;
+    }
+  });
+
   return facade;
 }
+
+const buildAdvertisedTool = ({
+  name,
+  title,
+  description,
+  decoratedSchema,
+}: {
+  name: string;
+  title?: string;
+  description?: string;
+  decoratedSchema: ZodObject<ZodRawShape>;
+}): Tool => ({
+  name,
+  ...(title === undefined ? {} : { title }),
+  ...(description === undefined ? {} : { description }),
+  inputSchema: toJsonSchemaCompat(decoratedSchema) as Tool["inputSchema"],
+});
 
 const decorateInputSchema = (
   schema: ZodObject<ZodRawShape>,

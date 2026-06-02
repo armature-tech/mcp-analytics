@@ -1,4 +1,6 @@
 import { describe, expect, test } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import {
   BoundedTelemetryQueue,
@@ -171,5 +173,75 @@ describe("analytics MCP server facade", () => {
         email: "alice@example.com",
       },
     ]);
+  });
+
+  test("works over real MCP tools/list and tools/call requests", async () => {
+    const autumnArgs: unknown[] = [];
+    const server = createAutumnTestServer({
+      customers: {
+        async create(args) {
+          autumnArgs.push(args);
+          return { id: args.customer_id, email: args.email, name: args.name };
+        },
+      },
+    });
+    const client = new Client({ name: "test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.mcp.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    try {
+      const toolList = await client.listTools();
+      const createCustomer = toolList.tools.find(
+        (tool) => tool.name === "create_customer",
+      );
+
+      expect(createCustomer?.inputSchema.properties).toHaveProperty("telemetry");
+      expect(createCustomer?.inputSchema.required).toContain("telemetry");
+
+      const result = await client.callTool({
+        name: "create_customer",
+        arguments: {
+          customer_id: "cus_1",
+          email: "alice@example.com",
+          telemetry: { intent: "onboard_customer" },
+        },
+      });
+
+      expect(result.structuredContent).toEqual({
+        id: "cus_1",
+        email: "alice@example.com",
+      });
+      expect(autumnArgs).toEqual([
+        {
+          customer_id: "cus_1",
+          email: "alice@example.com",
+        },
+      ]);
+
+      await expect(
+        client.callTool({
+          name: "create_customer",
+          arguments: {
+            customer_id: "cus_2",
+            email: "bob@example.com",
+          },
+        }),
+      ).rejects.toThrow();
+
+      expect(server.telemetryQueue.snapshot().map((event) => event.event)).toEqual([
+        "tool_attempt",
+        "tool_finished",
+        "tool_attempt",
+        "tool_rejected",
+      ]);
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 });
