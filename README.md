@@ -1,13 +1,13 @@
-# MCP Analytics
+# Mock Autumn MCP Server
 
-Testing sandbox for the `@armature/mcp-analytics` architecture.
+Minimal TypeScript test environment with a mock Autumn MCP server.
 
 ## Scripts
 
+- `npm run dev:server` starts the mock Autumn MCP server over stdio.
+- `npm run demo` runs an in-memory MCP client against the mock server and prints `tools/list`, `tools/call`, and the mock Autumn call log.
 - `npm run typecheck` checks the TypeScript project.
-- `npm test` runs the facade and fixture tests.
-- `npm run dev:server` starts a mock Autumn-style MCP server over stdio.
 
 ## Current Scope
 
-This repo currently contains a V0 architecture plan and a minimal TypeScript testing environment. The scaffold intentionally focuses on the explicit analytics-aware server facade described in `PLAN.md`; it does not attempt transparent factory wrapping or MCP SDK prototype patching.
+This repo intentionally contains only the mock Autumn MCP test environment. There is no analytics wrapper, plan document, or SDK implementation here.
