@@ -28,7 +28,7 @@ npm run demo
 npm run demo:instrumented
 ```
 
-The instrumented demo advertises a required `telemetry.intent` field in `tools/list`, sends that field in `tools/call`, confirms the mock Autumn call log receives only the original Autumn arguments, and confirms mock Armature receives the async telemetry POST with the tool output.
+The instrumented demo advertises a required `telemetry.intent` field plus optional `telemetry.context` and `telemetry.frustration_level` fields in `tools/list`, sends those fields in `tools/call`, confirms the mock Autumn call log receives only the original Autumn arguments, and confirms mock Armature receives the async ingest batch with a `tool_call` event.
 
 ## SDK Usage Sketch
 
@@ -45,18 +45,19 @@ const server = createMcpAnalyticsServer(
 `npm run dev:armature` starts an HTTP server on `http://127.0.0.1:8787`.
 
 - `GET /health` returns a readiness check.
-- `POST /telemetry` accepts a JSON object payload and stores it in memory.
+- `POST /api/mcp-analytics/ingest` accepts an mcp-tester-style ingest batch and stores it in memory.
+- `POST /telemetry` is kept as a compatibility alias for local experiments.
 - `GET /telemetry` returns all received telemetry payloads.
 - `DELETE /telemetry` clears the in-memory telemetry log.
 
 Example:
 
 ```sh
-curl -X POST http://127.0.0.1:8787/telemetry \
+curl -X POST http://127.0.0.1:8787/api/mcp-analytics/ingest \
   -H "Content-Type: application/json" \
-  -d '{"type":"tool_call","request_id":"req_1","tool_name":"create_customer","telemetry":{"intent":"create test customer"},"input":{"customer_id":"cus_1"},"output":{"structuredContent":{"id":"cus_1"}},"status":"success","duration_ms":12}'
+  -d '{"schema_version":1,"events":[{"event_id":"evt_1","kind":"tool_call","mcp_server_id":"srv_1","actor_id":"actor_1","session_id_hint":null,"started_at":"2026-06-02T12:00:00.000Z","finished_at":"2026-06-02T12:00:00.012Z","duration_ms":12,"ok":true,"error":null,"metadata":{"tool_name":"create_customer","intent":"create test customer","context":"demo","frustration_level":"low","input_preview":"{\"customer_id\":\"cus_1\"}"},"script_source":"MCP tool call: create_customer\n\nInput:\n{\"customer_id\":\"cus_1\"}","script_source_truncated":false,"result_preview":"{\"structuredContent\":{\"id\":\"cus_1\"}}","result_truncated":false,"calls":[],"logs":[],"search_calls":[]}]}'
 ```
 
 ## Current Scope
 
-The SDK currently decorates registered MCP tool schemas with `telemetry.intent`, strips telemetry before original tool handlers run, and asynchronously posts tool-call telemetry to Armature after the handler returns. The experimental environment exists so wrapper behavior can be developed and tested against mock Autumn and Armature services.
+The SDK currently decorates registered MCP tool schemas with telemetry fields, strips telemetry before original tool handlers run, and asynchronously posts signed mcp-tester ingest batches to Armature after the handler returns. Wrapped MCP tool executions emit generic `tool_call` events; Code Mode MCPs should continue to emit `execute_script`.
