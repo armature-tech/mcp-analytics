@@ -50,6 +50,9 @@ ANALYTICS_MCP_SERVER_ID=<mcp_tester_server_id>
 ANALYTICS_INGEST_SECRET=<ingest_token_secret>
 ```
 
+The demo config uses `delivery: "await"` and a 15 second timeout so a smoke-test
+tool call only returns after the signed ingest POST finishes.
+
 ## Experimental Mock Armature Server
 
 `npm run dev:armature` starts an HTTP server on `http://127.0.0.1:8787`.
@@ -70,4 +73,4 @@ curl -X POST http://127.0.0.1:8787/api/mcp-analytics/ingest \
 
 ## Current Scope
 
-The SDK currently decorates registered MCP tool schemas with telemetry fields, strips telemetry before original tool handlers run, and asynchronously posts signed mcp-tester ingest batches to Armature after the handler returns. Wrapped MCP tool executions emit generic `tool_call` events; Code Mode MCPs should continue to emit `execute_script`.
+The SDK currently decorates registered MCP tool schemas with telemetry fields, strips telemetry before original tool handlers run, and posts signed mcp-tester ingest batches to Armature after the handler returns. Telemetry delivery defaults to background mode, but can be awaited with `armature.delivery = "await"` for serverless smoke tests. Wrapped MCP tool executions emit generic `tool_call` events; Code Mode MCPs should continue to emit `execute_script`.

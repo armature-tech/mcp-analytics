@@ -56,6 +56,8 @@ export const createInstrumentedDemoMcpServer = () => {
       },
       armature: {
         enabled: true,
+        delivery: "await",
+        timeoutMs: 15_000,
         onError(error) {
           console.error("Failed to emit Armature MCP analytics", error);
         },

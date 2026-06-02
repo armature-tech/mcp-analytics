@@ -44,6 +44,7 @@ export type McpAnalyticsConfig = {
     mcpServerId?: string;
     actorId?: string;
     enabled?: boolean;
+    delivery?: "background" | "await";
     emit?: TelemetryEmitter;
     onError?: (error: unknown, batch: AnalyticsIngestBatch) => void;
     timeoutMs?: number;
@@ -478,7 +479,7 @@ export const emitTelemetryEvent = (
   config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
 ) => {
   if (config.armature?.enabled === false) {
-    return;
+    return Promise.resolve();
   }
 
   const emit =
@@ -487,11 +488,22 @@ export const emitTelemetryEvent = (
       await postTelemetryEvent(telemetryBatch, config);
     });
 
-  setImmediate(() => {
-    void Promise.resolve(emit(batch)).catch((error: unknown) => {
+  const run = async () => {
+    try {
+      await emit(batch);
+    } catch (error) {
       config.armature?.onError?.(error, batch);
-    });
+    }
+  };
+
+  if (config.armature?.delivery === "await") {
+    return run();
+  }
+
+  setImmediate(() => {
+    void run();
   });
+  return Promise.resolve();
 };
 
 const createAnalyticsContext = (
@@ -565,7 +577,7 @@ export const withMcpAnalytics = <ServerFactoryResult>(
             startedAt,
             finishedAt,
           });
-          emitTelemetryEvent(
+          await emitTelemetryEvent(
             buildBatch({
               event,
               extra,
@@ -595,7 +607,7 @@ export const withMcpAnalytics = <ServerFactoryResult>(
             startedAt,
             finishedAt,
           });
-          emitTelemetryEvent(
+          await emitTelemetryEvent(
             buildBatch({
               event,
               extra,
