@@ -1,5 +1,8 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createMcpAnalyticsServer } from "../../src/index.js";
+import {
+  createMcpAnalyticsServer,
+  type McpAnalyticsConfig,
+} from "../../src/index.js";
 import {
   createMockAutumnClient,
   createMockAutumnMcpServer,
@@ -8,8 +11,12 @@ import {
 
 export const createInstrumentedMockAutumnMcpServer = (
   autumn: MockAutumnClient = createMockAutumnClient(),
+  config?: McpAnalyticsConfig,
 ) => {
-  return createMcpAnalyticsServer(() => createMockAutumnMcpServer(autumn));
+  return createMcpAnalyticsServer(
+    () => createMockAutumnMcpServer(autumn),
+    config,
+  );
 };
 
 export const main = async () => {

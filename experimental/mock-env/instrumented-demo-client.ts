@@ -1,9 +1,46 @@
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { defaultMcpAnalyticsConfig } from "../../src/index.js";
 import { createInstrumentedMockAutumnMcpServer } from "./instrumented-mock-autumn-mcp-server.js";
+import { createMockArmatureServer } from "./mock-armature-server.js";
 
-const { server, autumn } = createInstrumentedMockAutumnMcpServer();
+const delay = async (ms: number) => {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+};
+
+const waitForTelemetry = async (telemetryUrl: string) => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const response = await fetch(telemetryUrl);
+    const body = (await response.json()) as {
+      telemetry?: Array<{ payload?: Record<string, unknown> }>;
+    };
+
+    if (body.telemetry?.length) {
+      return body.telemetry;
+    }
+
+    await delay(25);
+  }
+
+  throw new Error("Timed out waiting for telemetry POST.");
+};
+
+const armatureServer = createMockArmatureServer();
+await new Promise<void>((resolve) => {
+  armatureServer.listen(0, "127.0.0.1", resolve);
+});
+const armatureAddress = armatureServer.address() as AddressInfo;
+const armatureTelemetryUrl = `http://127.0.0.1:${armatureAddress.port}/telemetry`;
+
+const { server, autumn } = createInstrumentedMockAutumnMcpServer(undefined, {
+  ...defaultMcpAnalyticsConfig,
+  armature: {
+    ...defaultMcpAnalyticsConfig.armature,
+    endpointUrl: armatureTelemetryUrl,
+  },
+});
 const client = new Client({
   name: "instrumented-mock-autumn-demo-client",
   version: "0.0.0",
@@ -44,7 +81,35 @@ try {
       name: "Alice",
     },
   ]);
+
+  const receivedTelemetry = await waitForTelemetry(armatureTelemetryUrl);
+  console.log("\nMOCK ARMATURE TELEMETRY");
+  console.log(JSON.stringify(receivedTelemetry, null, 2));
+
+  const payload = receivedTelemetry[0]?.payload;
+  assert.equal(payload?.type, "tool_call");
+  assert.equal(payload?.tool_name, "create_customer");
+  assert.equal(payload?.status, "success");
+  assert.deepStrictEqual(payload?.telemetry, {
+    intent: "Create a customer in the mock Autumn system.",
+  });
+  assert.deepStrictEqual(payload?.input, {
+    customer_id: "cus_1",
+    email: "alice@example.com",
+    name: "Alice",
+  });
+  assert.deepStrictEqual(payload?.output, toolCall);
 } finally {
   await client.close();
   await server.close();
+  await new Promise<void>((resolve, reject) => {
+    armatureServer.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
 }
