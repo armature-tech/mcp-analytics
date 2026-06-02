@@ -1,5 +1,5 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { withMcpAnalytics } from "../../src/index.js";
+import { createMcpAnalyticsServer } from "../../src/index.js";
 import {
   createMockAutumnClient,
   createMockAutumnMcpServer,
@@ -9,14 +9,7 @@ import {
 export const createInstrumentedMockAutumnMcpServer = (
   autumn: MockAutumnClient = createMockAutumnClient(),
 ) => {
-  return withMcpAnalytics(
-    {
-      telemetry: {
-        intent: "required",
-      },
-    },
-    () => createMockAutumnMcpServer(autumn),
-  );
+  return createMcpAnalyticsServer(() => createMockAutumnMcpServer(autumn));
 };
 
 export const main = async () => {

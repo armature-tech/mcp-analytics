@@ -20,7 +20,7 @@ sequenceDiagram
   participant SDK as @armature/mcp-analytics
   participant MCP as Running MCP Server
 
-  AutumnCode->>SDK: withMcpAnalytics(config, createAutumnOperationsMCPServer)
+  AutumnCode->>SDK: createMcpAnalyticsServer(createAutumnOperationsMCPServer)
   SDK->>SDK: enable instrumentation context
   SDK->>AutumnCode: call createAutumnOperationsMCPServer()
 
@@ -114,14 +114,9 @@ Autumn receives only the original Autumn-compatible args. It never receives `tel
 ## SDK Usage Sketch
 
 ```ts
-import { withMcpAnalytics } from "@armature/mcp-analytics";
+import { createMcpAnalyticsServer } from "@armature/mcp-analytics";
 
-const server = withMcpAnalytics(
-  {
-    telemetry: {
-      intent: "required"
-    }
-  },
+const server = createMcpAnalyticsServer(
   () => createAutumnOperationsMCPServer()
 );
 ```

@@ -34,6 +34,12 @@ export type ExtractedToolArguments = {
   telemetry?: TelemetryArgs;
 };
 
+export const defaultMcpAnalyticsConfig = {
+  telemetry: {
+    intent: "required",
+  },
+} satisfies McpAnalyticsConfig;
+
 const telemetryInputSchema = z.object({
   intent: z.string().min(1),
 });
@@ -159,4 +165,11 @@ export const withMcpAnalytics = <ServerFactoryResult>(
   } finally {
     prototype.registerTool = originalRegisterTool;
   }
+};
+
+export const createMcpAnalyticsServer = <ServerFactoryResult>(
+  createServer: () => ServerFactoryResult,
+  config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
+): ServerFactoryResult => {
+  return withMcpAnalytics(config, createServer);
 };

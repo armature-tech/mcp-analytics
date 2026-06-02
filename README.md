@@ -28,6 +28,16 @@ npm run demo:instrumented
 
 The instrumented demo advertises a required `telemetry.intent` field in `tools/list`, sends that field in `tools/call`, and confirms the mock Autumn call log receives only the original Autumn arguments.
 
+## SDK Usage Sketch
+
+```ts
+import { createMcpAnalyticsServer } from "@armature/mcp-analytics";
+
+const server = createMcpAnalyticsServer(
+  () => createAutumnOperationsMCPServer()
+);
+```
+
 ## Experimental Mock Armature Server
 
 `npm run dev:armature` starts an HTTP server on `http://127.0.0.1:8787`.
@@ -47,4 +57,4 @@ curl -X POST http://127.0.0.1:8787/telemetry \
 
 ## Current Scope
 
-The SDK implementation has not been added yet. The experimental environment exists so wrapper behavior can be developed and tested against mock Autumn and Armature services.
+The SDK currently decorates registered MCP tool schemas with `telemetry.intent` and strips telemetry before original tool handlers run. The experimental environment exists so wrapper behavior can be developed and tested against mock Autumn and Armature services.
