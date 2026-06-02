@@ -1,7 +1,11 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
-import { createAnalyticsMcpServer } from "../server/analytics-mcp-server.js";
+import { z, type ZodObject, type ZodRawShape } from "zod";
+import {
+	createAnalyticsMcpServer,
+	type AnalyticsMcpServer,
+} from "../server/analytics-mcp-server.js";
 
 export type MockAutumnClient = {
   customers: {
@@ -25,28 +29,36 @@ export const createMockAutumnClient = (): MockAutumnClient => ({
   },
 });
 
-export const createAutumnTestServer = (
-  autumn: MockAutumnClient = createMockAutumnClient(),
-) => {
-  const server = createAnalyticsMcpServer({
-    name: "autumn-test",
-    version: "0.0.0",
-    telemetry: {
-      intent: "required",
-    },
-  });
+type ToolRegistrar = {
+	registerTool<Shape extends ZodRawShape>(
+		name: string,
+		config: {
+			description?: string;
+			inputSchema: ZodObject<Shape>;
+		},
+		handler: (
+			args: z.infer<ZodObject<Shape>>,
+		) => Promise<CallToolResult> | CallToolResult,
+	): void;
+};
 
-  server.registerTool(
+const createCustomerInputSchema = z
+	.object({
+		customer_id: z.string().min(1),
+		email: z.string().email().optional(),
+		name: z.string().optional(),
+	})
+	.strict();
+
+export const registerAutumnCustomerTools = (
+	registrar: ToolRegistrar,
+	autumn: MockAutumnClient,
+) => {
+	registrar.registerTool(
     "create_customer",
     {
       description: "Create a mock Autumn customer.",
-      inputSchema: z
-        .object({
-          customer_id: z.string().min(1),
-          email: z.string().email().optional(),
-          name: z.string().optional(),
-        })
-        .strict(),
+      inputSchema: createCustomerInputSchema,
     },
     async (args): Promise<CallToolResult> => {
       const customer = await autumn.customers.create(args);
@@ -56,12 +68,54 @@ export const createAutumnTestServer = (
       };
     },
   );
+};
+
+export type UninstrumentedAutumnTestServer = {
+	mcp: McpServer;
+};
+
+export const createUninstrumentedAutumnTestServer = (
+	autumn: MockAutumnClient = createMockAutumnClient(),
+): UninstrumentedAutumnTestServer => {
+	const mcp = new McpServer({
+		name: "autumn-uninstrumented",
+		version: "0.0.0",
+	});
+	const registrar: ToolRegistrar = {
+		registerTool(name, config, handler) {
+			mcp.registerTool(
+				name,
+				{
+					description: config.description,
+					inputSchema: config.inputSchema.shape,
+				},
+				handler as never,
+			);
+		},
+	};
+
+	registerAutumnCustomerTools(registrar, autumn);
+
+	return { mcp };
+};
+
+export const createInstrumentedAutumnTestServer = (
+  autumn: MockAutumnClient = createMockAutumnClient(),
+): AnalyticsMcpServer => {
+  const server = createAnalyticsMcpServer({
+    name: "autumn-instrumented",
+    version: "0.0.0",
+  });
+
+  registerAutumnCustomerTools(server, autumn);
 
   return server;
 };
 
+export const createAutumnTestServer = createInstrumentedAutumnTestServer;
+
 export const main = async () => {
-  const server = createAutumnTestServer();
+  const server = createInstrumentedAutumnTestServer();
   await server.mcp.connect(new StdioServerTransport());
 };
 

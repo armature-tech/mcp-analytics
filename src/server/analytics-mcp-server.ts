@@ -11,15 +11,11 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z, type ZodObject, type ZodRawShape, type ZodTypeAny } from "zod";
 
-export type TelemetryMode = "required" | "optional";
 export type QueueDropPolicy = "drop_newest" | "drop_oldest";
 
 export type AnalyticsServerConfig = {
   name: string;
   version: string;
-  telemetry: {
-    intent: TelemetryMode;
-  };
   queue?: {
     maxEvents?: number;
     dropPolicy?: QueueDropPolicy;
@@ -137,7 +133,6 @@ export function createAnalyticsMcpServer(
 
       const decoratedSchema = decorateInputSchema(
         toolConfig.inputSchema,
-        config.telemetry.intent,
       );
       const advertisedTool = buildAdvertisedTool({
         name,
@@ -265,16 +260,15 @@ const buildAdvertisedTool = ({
 
 const decorateInputSchema = (
   schema: ZodObject<ZodRawShape>,
-  telemetryMode: TelemetryMode,
 ) => {
   if ("telemetry" in schema.shape) {
     throw new Error("Cannot decorate a tool schema that already has telemetry");
   }
 
-  const telemetrySchema =
-    telemetryMode === "required"
-      ? z.object({ intent: z.string().min(1) }).catchall(z.string())
-      : z.object({ intent: z.string().min(1).optional() }).catchall(z.string()).optional();
+  const telemetrySchema = z
+    .object({ intent: z.string().min(1).optional() })
+    .catchall(z.string())
+    .optional();
 
   return schema.extend({
     telemetry: telemetrySchema as ZodTypeAny,

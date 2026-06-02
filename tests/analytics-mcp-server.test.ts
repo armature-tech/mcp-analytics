@@ -10,7 +10,7 @@ import {
 import { createAutumnTestServer } from "../src/testing/autumn-test-server.js";
 
 describe("analytics MCP server facade", () => {
-  test("decorates a strict object schema with required telemetry", () => {
+  test("decorates a strict object schema with optional runtime telemetry", () => {
     const server = createAutumnTestServer();
     const schema = server.getDecoratedInputSchema("create_customer");
 
@@ -23,7 +23,6 @@ describe("analytics MCP server facade", () => {
     const server = createAnalyticsMcpServer({
       name: "test",
       version: "0.0.0",
-      telemetry: { intent: "required" },
     });
 
     server.registerTool(
@@ -60,12 +59,41 @@ describe("analytics MCP server facade", () => {
     ]);
   });
 
-  test("observes rejected calls before the original handler runs", async () => {
+  test("allows calls without telemetry and still runs the original handler", async () => {
+    const receivedArgs: unknown[] = [];
+    const server = createAnalyticsMcpServer({
+      name: "test",
+      version: "0.0.0",
+    });
+
+    server.registerTool(
+      "create_customer",
+      {
+        inputSchema: z.object({ customer_id: z.string() }).strict(),
+      },
+      async (args) => {
+        receivedArgs.push(args);
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    );
+
+    await expect(
+      server.callTool("create_customer", { customer_id: "cus_1" }),
+    ).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
+
+    expect(receivedArgs).toEqual([{ customer_id: "cus_1" }]);
+    expect(server.telemetryQueue.snapshot().map((event) => event.event)).toEqual([
+      "tool_attempt",
+      "tool_finished",
+    ]);
+    expect(server.telemetryQueue.snapshot()[0]?.intent).toBeUndefined();
+  });
+
+  test("observes rejected calls with invalid original args before the original handler runs", async () => {
     let called = false;
     const server = createAnalyticsMcpServer({
       name: "test",
       version: "0.0.0",
-      telemetry: { intent: "required" },
     });
 
     server.registerTool(
@@ -80,7 +108,7 @@ describe("analytics MCP server facade", () => {
     );
 
     await expect(
-      server.callTool("create_customer", { customer_id: "cus_1" }),
+      server.callTool("create_customer", { customer_id: 123 }),
     ).rejects.toBeInstanceOf(ToolValidationError);
 
     expect(called).toBe(false);
@@ -96,7 +124,6 @@ describe("analytics MCP server facade", () => {
     const server = createAnalyticsMcpServer({
       name: "test",
       version: "0.0.0",
-      telemetry: { intent: "required" },
     });
 
     server.registerTool(
@@ -201,7 +228,7 @@ describe("analytics MCP server facade", () => {
       );
 
       expect(createCustomer?.inputSchema.properties).toHaveProperty("telemetry");
-      expect(createCustomer?.inputSchema.required).toContain("telemetry");
+      expect(createCustomer?.inputSchema.required).not.toContain("telemetry");
 
       const result = await client.callTool({
         name: "create_customer",
@@ -231,13 +258,28 @@ describe("analytics MCP server facade", () => {
             email: "bob@example.com",
           },
         }),
-      ).rejects.toThrow();
+      ).resolves.toMatchObject({
+        structuredContent: {
+          id: "cus_2",
+          email: "bob@example.com",
+        },
+      });
 
       expect(server.telemetryQueue.snapshot().map((event) => event.event)).toEqual([
         "tool_attempt",
         "tool_finished",
         "tool_attempt",
-        "tool_rejected",
+        "tool_finished",
+      ]);
+      expect(autumnArgs).toEqual([
+        {
+          customer_id: "cus_1",
+          email: "alice@example.com",
+        },
+        {
+          customer_id: "cus_2",
+          email: "bob@example.com",
+        },
       ]);
     } finally {
       await client.close();

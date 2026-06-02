@@ -5,5 +5,4 @@ export {
   type AnalyticsMcpServer,
   type AnalyticsServerConfig,
   type TelemetryEvent,
-  type TelemetryMode,
 } from "./server/analytics-mcp-server.js";
