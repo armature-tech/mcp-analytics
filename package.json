@@ -1,9 +1,24 @@
 {
-  "name": "@armature/mcp-analytics",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@armature-tech/mcp-analytics",
+  "version": "0.1.0",
   "type": "module",
   "description": "MCP analytics wrapper SDK that instruments MCP tool declarations with telemetry.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/armature-tech/mcp-analytics.git"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "dev:armature": "tsx experimental/mock-env/mock-armature-server.ts",
     "dev:instrumented-server": "tsx experimental/mock-env/instrumented-mock-autumn-mcp-server.ts",
@@ -13,7 +28,13 @@
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
-    "check": "npm run typecheck:all && npm test"
+    "check": "npm run typecheck:all && npm test",
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
+    "prepublishOnly": "npm run check && npm run build"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.0",

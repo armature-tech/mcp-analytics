@@ -48,7 +48,7 @@ export default function handler(
     ok: true,
     service: "experimental-vercel-mcp-demo",
     version: "0.1.0",
-    instrumented_with: "@armature/mcp-analytics",
+    instrumented_with: "@armature-tech/mcp-analytics",
     timestamp: new Date().toISOString(),
   });
 }
