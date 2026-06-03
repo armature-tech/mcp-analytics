@@ -5,6 +5,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import {
   buildActorId,
+  buildSessionInitEvent,
   createAnalyticsRecorder,
   decorateInputSchemaWithTelemetry,
   type AnalyticsIngestBatch,
@@ -588,6 +589,132 @@ test("recorder.tool registered after attachToMcpServer still reaches the attache
     await client.close();
     await server.close();
   }
+});
+
+test("buildSessionInitEvent populates harness fields from clientInfo", () => {
+  const event = buildSessionInitEvent({
+    mcpServerId: "srv",
+    actorId: "actor",
+    sessionId: "session-abc",
+    requestId: "req-1",
+    startedAt: "2026-06-03T00:00:00.000Z",
+    extra: {
+      requestInfo: { headers: { "user-agent": "Test/1.0" } },
+    },
+    clientInfo: {
+      name: "  Claude Desktop  ",
+      version: "1.2.3",
+      protocolVersion: "2025-06-18",
+      capabilities: { tools: {}, sampling: {} },
+    },
+  });
+
+  assert.equal(event.metadata.client_name, "Claude Desktop");
+  assert.equal(event.metadata.client_version, "1.2.3");
+  assert.equal(event.metadata.protocol_version, "2025-06-18");
+  assert.deepEqual(event.metadata.capabilities, { tools: {}, sampling: {} });
+  assert.equal(event.metadata.user_agent, "Test/1.0");
+});
+
+test("buildSessionInitEvent falls back to authInfo.clientId for client_name when clientInfo is absent", () => {
+  const event = buildSessionInitEvent({
+    mcpServerId: "srv",
+    actorId: "actor",
+    sessionId: "session-abc",
+    requestId: "req-2",
+    startedAt: "2026-06-03T00:00:00.000Z",
+    extra: {
+      authInfo: { clientId: "oauth-client-xyz" },
+    },
+  });
+
+  assert.equal(event.metadata.client_name, "oauth-client-xyz");
+  assert.equal(event.metadata.client_version, null);
+  assert.equal(event.metadata.protocol_version, null);
+  assert.equal(event.metadata.capabilities, null);
+  assert.equal(event.metadata.user_agent, null);
+});
+
+test("buildSessionInitEvent drops capabilities >4 KB to null instead of truncating", () => {
+  const big = { tools: { list: "x".repeat(5_000) } };
+  const event = buildSessionInitEvent({
+    mcpServerId: "srv",
+    actorId: "actor",
+    sessionId: "session-abc",
+    requestId: "req-3",
+    startedAt: "2026-06-03T00:00:00.000Z",
+    clientInfo: {
+      name: "Claude Desktop",
+      capabilities: big,
+    },
+  });
+
+  assert.equal(event.metadata.capabilities, null);
+  assert.equal(event.metadata.client_name, "Claude Desktop");
+});
+
+test("buildSessionInitEvent prefers clientInfo.name over authInfo.clientId", () => {
+  const event = buildSessionInitEvent({
+    mcpServerId: "srv",
+    actorId: "actor",
+    sessionId: "session-abc",
+    requestId: "req-4",
+    startedAt: "2026-06-03T00:00:00.000Z",
+    extra: { authInfo: { clientId: "oauth-client-xyz" } },
+    clientInfo: { name: "Claude Desktop" },
+  });
+
+  assert.equal(event.metadata.client_name, "Claude Desktop");
+});
+
+test("instrumentToolCall with header-only sessionId + clientInfo emits harness fields and matching session_id_hint", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      mcpServerId: "harness-capture",
+      delivery: "await",
+      actorId: "harness-actor",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  await recorder.instrumentToolCall(
+    {
+      name: "lookup_customer",
+      args: { customer_id: "cus_1" },
+      extra: {
+        requestInfo: {
+          headers: {
+            "mcp-session-id": "header-session-abc",
+            "user-agent": "Claude/Test",
+          },
+        },
+      },
+      clientInfo: {
+        name: "Claude Desktop",
+        version: "1.2.3",
+        protocolVersion: "2025-06-18",
+        capabilities: { tools: {} },
+      },
+    },
+    async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+  );
+
+  const events = batches.flatMap((batch) => batch.events);
+  const sessionInit = events.find((event) => event.kind === "session_init");
+  const toolCall = events.find((event) => event.kind === "tool_call");
+
+  assert.ok(sessionInit, "expected a session_init event");
+  assert.ok(toolCall, "expected a tool_call event");
+  assert.equal(sessionInit?.session_id_hint, "header-session-abc");
+  assert.equal(toolCall?.session_id_hint, "header-session-abc");
+  assert.equal(sessionInit?.metadata.client_name, "Claude Desktop");
+  assert.equal(sessionInit?.metadata.client_version, "1.2.3");
+  assert.equal(sessionInit?.metadata.protocol_version, "2025-06-18");
+  assert.deepEqual(sessionInit?.metadata.capabilities, { tools: {} });
+  assert.equal(sessionInit?.metadata.user_agent, "Claude/Test");
 });
 
 test("attaching the same recorder to two McpServers throws", () => {

@@ -150,6 +150,7 @@ export const createAnalyticsRecorder = (
       startedAt,
       extra: event.extra,
       sessionInitKeys,
+      clientInfo: event.clientInfo,
     });
 
     if (batch) await emitBatch(batch);
@@ -209,6 +210,7 @@ export const createAnalyticsRecorder = (
         actorId: context.actorId,
         startedAt,
         sessionInitKeys,
+        clientInfo: event.clientInfo,
       }),
     );
   };

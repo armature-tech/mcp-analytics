@@ -4,6 +4,7 @@ import type { HeaderBag, JsonObjectSchema } from "./types.js";
 export const SCHEMA_VERSION = 1 as const;
 export const MAX_SOURCE_BYTES = 32 * 1024;
 export const MAX_PREVIEW_BYTES = 8 * 1024;
+export const MAX_CAPABILITIES_BYTES = 4 * 1024;
 
 export const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -53,9 +54,16 @@ export const truncateUtf8 = (value: string, maxBytes: number) => {
 export const headerValue = (headers: HeaderBag | undefined, name: string) => {
   if (!headers) return null;
   if (headers instanceof Headers) return headers.get(name);
-  const exact = headers[name];
-  const lower = headers[name.toLowerCase()];
-  const value = exact ?? lower;
+  const lower = name.toLowerCase();
+  let value: string | string[] | undefined = headers[name] ?? headers[lower];
+  if (value === undefined) {
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === lower) {
+        value = headers[key];
+        break;
+      }
+    }
+  }
   if (Array.isArray(value)) return value[0] ?? null;
   return value ?? null;
 };

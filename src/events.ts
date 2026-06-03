@@ -3,18 +3,39 @@ import type {
   AnalyticsEventKind,
   AnalyticsIngestBatch,
   AnalyticsIngestEvent,
+  McpClientInfo,
   RequestExtra,
   TelemetryArgs,
 } from "./types.js";
 import {
+  MAX_CAPABILITIES_BYTES,
   MAX_PREVIEW_BYTES,
   MAX_SOURCE_BYTES,
   SCHEMA_VERSION,
   headerValue,
+  isRecord,
   sha256Hex,
   stringifyPreview,
   truncateUtf8,
 } from "./utils.js";
+
+const trimOrUndefined = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const capCapabilities = (
+  capabilities: McpClientInfo["capabilities"],
+): Record<string, unknown> | null => {
+  if (!isRecord(capabilities)) return null;
+  try {
+    if (JSON.stringify(capabilities).length > MAX_CAPABILITIES_BYTES) return null;
+  } catch {
+    return null;
+  }
+  return capabilities;
+};
 
 export const buildActorId = ({
   mcpServerId,
@@ -114,6 +135,7 @@ export const buildSessionInitEvent = ({
   requestId,
   startedAt,
   extra,
+  clientInfo,
 }: {
   mcpServerId: string;
   actorId: string;
@@ -121,6 +143,7 @@ export const buildSessionInitEvent = ({
   requestId: string;
   startedAt: string;
   extra?: RequestExtra;
+  clientInfo?: McpClientInfo;
 }): AnalyticsIngestEvent => {
   return {
     event_id: buildEventId({ mcpServerId, actorId, requestId, kind: "session_init" }),
@@ -134,10 +157,13 @@ export const buildSessionInitEvent = ({
     ok: true,
     error: null,
     metadata: {
-      client_name: extra?.authInfo?.clientId ?? null,
-      client_version: null,
-      protocol_version: null,
-      capabilities: null,
+      client_name:
+        trimOrUndefined(clientInfo?.name)
+        ?? trimOrUndefined(extra?.authInfo?.clientId)
+        ?? null,
+      client_version: trimOrUndefined(clientInfo?.version) ?? null,
+      protocol_version: trimOrUndefined(clientInfo?.protocolVersion) ?? null,
+      capabilities: capCapabilities(clientInfo?.capabilities),
       user_agent: headerValue(extra?.requestInfo?.headers, "user-agent"),
     },
     script_source: null,
@@ -157,6 +183,7 @@ export const buildBatch = ({
   actorId,
   startedAt,
   sessionInitKeys,
+  clientInfo,
 }: {
   event: AnalyticsIngestEvent;
   extra?: RequestExtra;
@@ -164,6 +191,7 @@ export const buildBatch = ({
   actorId: string;
   startedAt: string;
   sessionInitKeys: Set<string>;
+  clientInfo?: McpClientInfo;
 }): AnalyticsIngestBatch => {
   const events: AnalyticsIngestEvent[] = [];
 
@@ -178,6 +206,7 @@ export const buildBatch = ({
         requestId: `${event.event_id}:session_init`,
         startedAt,
         extra,
+        clientInfo,
       }));
     }
   }
@@ -194,6 +223,7 @@ export const buildSessionInitBatch = ({
   startedAt,
   extra,
   sessionInitKeys,
+  clientInfo,
 }: {
   mcpServerId: string;
   actorId: string;
@@ -202,6 +232,7 @@ export const buildSessionInitBatch = ({
   startedAt: string;
   extra?: RequestExtra;
   sessionInitKeys: Set<string>;
+  clientInfo?: McpClientInfo;
 }): AnalyticsIngestBatch | null => {
   const key = `${mcpServerId}:${actorId}:${sessionId}`;
   if (sessionInitKeys.has(key)) return null;
@@ -217,6 +248,7 @@ export const buildSessionInitBatch = ({
         requestId,
         startedAt,
         extra,
+        clientInfo,
       }),
     ],
   };
@@ -225,8 +257,10 @@ export const buildSessionInitBatch = ({
 export const normalizeSessionId = (
   eventSessionId: string | undefined,
   extra: RequestExtra | undefined,
-) => {
-  return eventSessionId ?? extra?.sessionId;
+): string | undefined => {
+  const explicit = trimOrUndefined(eventSessionId) ?? trimOrUndefined(extra?.sessionId);
+  if (explicit) return explicit;
+  return trimOrUndefined(headerValue(extra?.requestInfo?.headers, "mcp-session-id"));
 };
 
 export const normalizeRequestId = (

@@ -10,6 +10,7 @@ export type {
   InstrumentToolCallEvent,
   JsonObjectSchema,
   McpAnalyticsConfig,
+  McpClientInfo,
   McpServerInfo,
   RecordSessionInitEvent,
   RecordToolCallEvent,
@@ -34,7 +35,9 @@ export {
 export {
   buildActorId,
   buildEventId,
+  buildSessionInitEvent,
   buildToolCallEvent,
+  normalizeSessionId,
 } from "./events.js";
 
 export {

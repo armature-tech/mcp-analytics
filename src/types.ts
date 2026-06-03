@@ -20,6 +20,13 @@ export type RegisterTool = (
 
 export type HeaderBag = Headers | Record<string, string | string[] | undefined>;
 
+export type McpClientInfo = {
+  name?: string;
+  version?: string;
+  protocolVersion?: string;
+  capabilities?: Record<string, unknown> | null;
+};
+
 export type RequestExtra = {
   sessionId?: string;
   requestId?: string | number;
@@ -94,6 +101,7 @@ export type RecordSessionInitEvent = {
   sessionId?: string;
   requestId?: string;
   startedAt?: string | Date | number;
+  clientInfo?: McpClientInfo;
 };
 
 export type RecordToolCallEvent = {
@@ -111,6 +119,7 @@ export type RecordToolCallEvent = {
   status: "ok" | "error";
   result?: unknown;
   error?: unknown;
+  clientInfo?: McpClientInfo;
 };
 
 export type InstrumentToolCallEvent = {
@@ -122,6 +131,7 @@ export type InstrumentToolCallEvent = {
   authInfo?: RequestExtra["authInfo"];
   sessionId?: string;
   requestId?: string;
+  clientInfo?: McpClientInfo;
 };
 
 export type ToolCallHandler<T> = (args: unknown) => T | Promise<T>;
@@ -133,6 +143,7 @@ export type ToolHandlerContext = {
   authInfo?: RequestExtra["authInfo"];
   sessionId?: string;
   requestId?: string;
+  clientInfo?: McpClientInfo;
 };
 
 export type RegisteredToolHandler<TArgs, TResult> = (
