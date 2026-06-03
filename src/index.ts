@@ -20,9 +20,9 @@ type RegisterTool = (
   cb: ToolCallback,
 ) => unknown;
 
-type HeaderBag = Headers | Record<string, string | string[] | undefined>;
+export type HeaderBag = Headers | Record<string, string | string[] | undefined>;
 
-type RequestExtra = {
+export type RequestExtra = {
   sessionId?: string;
   requestId?: string | number;
   authInfo?: {
@@ -34,6 +34,19 @@ type RequestExtra = {
   };
 };
 
+export type ActorIdResolverInput = {
+  ctx?: unknown;
+  extra?: RequestExtra;
+  headers?: HeaderBag;
+  authInfo?: RequestExtra["authInfo"];
+  toolName?: string;
+  telemetry?: TelemetryArgs;
+};
+
+export type ActorIdResolver = (
+  input: ActorIdResolverInput,
+) => string | Promise<string>;
+
 export type McpAnalyticsConfig = {
   telemetry?: {
     intent?: "required" | "optional";
@@ -42,7 +55,7 @@ export type McpAnalyticsConfig = {
     endpointUrl?: string;
     ingestSecret?: string;
     mcpServerId?: string;
-    actorId?: string;
+    actorId?: string | ActorIdResolver;
     enabled?: boolean;
     delivery?: "background" | "await";
     emit?: TelemetryEmitter;
@@ -60,6 +73,111 @@ export type TelemetryArgs = {
 export type ExtractedToolArguments = {
   args: unknown;
   telemetry?: TelemetryArgs;
+};
+
+export type JsonObjectSchema = {
+  type?: "object";
+  properties?: Record<string, unknown>;
+  required?: string[];
+  [key: string]: unknown;
+};
+
+export type ToolDefinition = {
+  name: string;
+  inputSchema?: unknown;
+  [key: string]: unknown;
+};
+
+export type RecordSessionInitEvent = {
+  ctx?: unknown;
+  extra?: RequestExtra;
+  headers?: HeaderBag;
+  authInfo?: RequestExtra["authInfo"];
+  sessionId?: string;
+  requestId?: string;
+  startedAt?: string | Date | number;
+};
+
+export type RecordToolCallEvent = {
+  name: string;
+  args?: unknown;
+  telemetry?: TelemetryArgs;
+  ctx?: unknown;
+  extra?: RequestExtra;
+  headers?: HeaderBag;
+  authInfo?: RequestExtra["authInfo"];
+  sessionId?: string;
+  requestId?: string;
+  startedAt?: string | Date | number;
+  durationMs?: number;
+  status: "ok" | "success" | "error";
+  result?: unknown;
+  error?: unknown;
+};
+
+export type InstrumentToolCallEvent = {
+  name: string;
+  args?: unknown;
+  ctx?: unknown;
+  extra?: RequestExtra;
+  headers?: HeaderBag;
+  authInfo?: RequestExtra["authInfo"];
+  sessionId?: string;
+  requestId?: string;
+};
+
+export type ToolCallHandler<T> = (args: unknown) => T | Promise<T>;
+
+export type ToolHandlerContext = {
+  ctx?: unknown;
+  extra?: RequestExtra;
+  headers?: HeaderBag;
+  authInfo?: RequestExtra["authInfo"];
+  sessionId?: string;
+  requestId?: string;
+};
+
+export type RegisteredToolHandler<TArgs, TResult> = (
+  args: TArgs,
+  context: ToolHandlerContext,
+) => TResult | Promise<TResult>;
+
+export type ToolRegistration = {
+  name: string;
+  title?: string;
+  description?: string;
+  inputSchema?: unknown;
+};
+
+export type McpServerInfo = {
+  name: string;
+  version: string;
+  title?: string;
+};
+
+export type AnalyticsRecorder = {
+  decorateDefinitions: (defs: ToolDefinition[]) => ToolDefinition[];
+  extractTelemetry: (args: unknown) => ExtractedToolArguments;
+  recordToolCall: (event: RecordToolCallEvent) => Promise<void>;
+  recordSessionInit: (event: RecordSessionInitEvent) => Promise<void>;
+  instrumentToolCall: <T>(
+    event: InstrumentToolCallEvent,
+    handler: ToolCallHandler<T>,
+  ) => Promise<T>;
+  tool: <TArgs = unknown, TResult = unknown>(
+    registration: ToolRegistration,
+    handler: RegisteredToolHandler<TArgs, TResult>,
+  ) => (rawArgs: unknown, context?: ToolHandlerContext) => Promise<TResult>;
+  dispatch: <T = unknown>(
+    name: string,
+    rawArgs: unknown,
+    context?: ToolHandlerContext,
+  ) => Promise<T>;
+  toolDefinitions: () => ToolDefinition[];
+  hasTool: (name: string) => boolean;
+  attachToMcpServer: (server: McpServer) => McpServer;
+  createMcpServer: (info: McpServerInfo) => McpServer;
+  flush: () => Promise<void>;
 };
 
 export type AnalyticsEventKind = "tool_call" | "session_init";
@@ -108,7 +226,6 @@ export const defaultMcpAnalyticsConfig = {
 const SCHEMA_VERSION = 1 as const;
 const MAX_SOURCE_BYTES = 32 * 1024;
 const MAX_PREVIEW_BYTES = 8 * 1024;
-const sessionInitKeys = new Set<string>();
 
 const telemetryInputSchema = z.object({
   intent: z.string().min(1),
@@ -136,8 +253,13 @@ const isRawShape = (value: unknown): value is Record<string, unknown> => {
   return (
     isRecord(value) &&
     !("_def" in value) &&
-    !("_zod" in value)
+    !("_zod" in value) &&
+    !isJsonObjectSchema(value)
   );
+};
+
+const isJsonObjectSchema = (value: unknown): value is JsonObjectSchema => {
+  return isRecord(value) && value.type === "object";
 };
 
 export const createTelemetryInputSchema = (
@@ -146,6 +268,48 @@ export const createTelemetryInputSchema = (
   return config.telemetry?.intent === "optional"
     ? optionalTelemetryInputSchema
     : telemetryInputSchema;
+};
+
+export const createTelemetryJsonSchema = (
+  config: McpAnalyticsConfig = {},
+): JsonObjectSchema => {
+  const required =
+    config.telemetry?.intent === "optional" ? [] : ["intent"];
+
+  return {
+    type: "object",
+    properties: {
+      intent: { type: "string", minLength: 1 },
+      context: { type: "string", minLength: 1 },
+      frustration_level: {
+        type: "string",
+        enum: ["low", "medium", "high"],
+      },
+    },
+    ...(required.length > 0 ? { required } : {}),
+  };
+};
+
+const decorateJsonSchemaWithTelemetry = (
+  inputSchema: JsonObjectSchema,
+  config: McpAnalyticsConfig,
+): JsonObjectSchema => {
+  const existingRequired = Array.isArray(inputSchema.required)
+    ? inputSchema.required
+    : [];
+  const required = config.telemetry?.intent === "optional"
+    ? existingRequired
+    : Array.from(new Set([...existingRequired, "telemetry"]));
+
+  return {
+    ...inputSchema,
+    type: "object",
+    properties: {
+      ...(inputSchema.properties ?? {}),
+      telemetry: createTelemetryJsonSchema(config),
+    },
+    ...(required.length > 0 ? { required } : {}),
+  };
 };
 
 export const decorateInputSchemaWithTelemetry = (
@@ -162,6 +326,10 @@ export const decorateInputSchemaWithTelemetry = (
     return inputSchema.extend({ telemetry });
   }
 
+  if (isJsonObjectSchema(inputSchema)) {
+    return decorateJsonSchemaWithTelemetry(inputSchema, config);
+  }
+
   if (isRawShape(inputSchema)) {
     return {
       ...inputSchema,
@@ -170,7 +338,7 @@ export const decorateInputSchemaWithTelemetry = (
   }
 
   throw new Error(
-    "MCP analytics can only decorate undefined, Zod object, or raw-shape input schemas.",
+    "MCP analytics can only decorate undefined, Zod object, JSON object, or raw-shape input schemas.",
   );
 };
 
@@ -240,15 +408,20 @@ const headerValue = (headers: HeaderBag | undefined, name: string) => {
   return value ?? null;
 };
 
-const resolveActorSeed = (
+const resolveActorSeed = async (
   config: McpAnalyticsConfig,
-  extra: RequestExtra | undefined,
-) => {
-  if (config.armature?.actorId) return config.armature.actorId;
-  if (extra?.authInfo?.token) return extra.authInfo.token;
-  if (extra?.authInfo?.clientId) return extra.authInfo.clientId;
+  input: ActorIdResolverInput,
+): Promise<string> => {
+  const configuredActorId = config.armature?.actorId;
+  if (typeof configuredActorId === "function") {
+    return configuredActorId(input);
+  }
+  if (configuredActorId) return configuredActorId;
 
-  const authorization = headerValue(extra?.requestInfo?.headers, "authorization");
+  if (input.authInfo?.token) return input.authInfo.token;
+  if (input.authInfo?.clientId) return input.authInfo.clientId;
+
+  const authorization = headerValue(input.headers, "authorization");
   if (authorization) return authorization;
 
   return "anonymous";
@@ -300,7 +473,7 @@ export const buildToolCallEvent = ({
   toolName: string;
   telemetry?: TelemetryArgs;
   input: unknown;
-  output?: CallToolResult;
+  output?: unknown;
   status: "success" | "error";
   durationMs: number;
   errorMessage?: string;
@@ -394,12 +567,14 @@ const buildBatch = ({
   mcpServerId,
   actorId,
   startedAt,
+  sessionInitKeys,
 }: {
   event: AnalyticsIngestEvent;
   extra?: RequestExtra;
   mcpServerId: string;
   actorId: string;
   startedAt: string;
+  sessionInitKeys: Set<string>;
 }): AnalyticsIngestBatch => {
   const events: AnalyticsIngestEvent[] = [];
 
@@ -420,6 +595,42 @@ const buildBatch = ({
 
   events.push(event);
   return { schema_version: SCHEMA_VERSION, events };
+};
+
+const buildSessionInitBatch = ({
+  mcpServerId,
+  actorId,
+  sessionId,
+  requestId,
+  startedAt,
+  extra,
+  sessionInitKeys,
+}: {
+  mcpServerId: string;
+  actorId: string;
+  sessionId: string;
+  requestId: string;
+  startedAt: string;
+  extra?: RequestExtra;
+  sessionInitKeys: Set<string>;
+}): AnalyticsIngestBatch | null => {
+  const key = `${mcpServerId}:${actorId}:${sessionId}`;
+  if (sessionInitKeys.has(key)) return null;
+
+  sessionInitKeys.add(key);
+  return {
+    schema_version: SCHEMA_VERSION,
+    events: [
+      buildSessionInitEvent({
+        mcpServerId,
+        actorId,
+        sessionId,
+        requestId,
+        startedAt,
+        extra,
+      }),
+    ],
+  };
 };
 
 export const signIngestBody = (
@@ -506,25 +717,400 @@ export const emitTelemetryEvent = (
   return Promise.resolve();
 };
 
-const createAnalyticsContext = (
+const createAnalyticsContext = async (
   config: McpAnalyticsConfig,
-  extra: RequestExtra | undefined,
-) => {
+  input: ActorIdResolverInput,
+): Promise<{ mcpServerId: string; actorId: string } | null> => {
   const mcpServerId = resolveMcpServerId(config);
   if (!mcpServerId) return null;
 
+  const actorSeed = await resolveActorSeed(config, input);
   const actorId = buildActorId({
     mcpServerId,
-    actorSeed: resolveActorSeed(config, extra),
+    actorSeed,
   });
 
   return { mcpServerId, actorId };
 };
 
+const normalizeSessionId = (
+  eventSessionId: string | undefined,
+  extra: RequestExtra | undefined,
+) => {
+  return eventSessionId ?? extra?.sessionId;
+};
+
+const normalizeRequestId = (
+  eventRequestId: string | undefined,
+  extra: RequestExtra | undefined,
+) => {
+  return eventRequestId ?? (
+    extra?.requestId === undefined ? randomUUID() : String(extra.requestId)
+  );
+};
+
+const normalizeStartedAt = ({
+  startedAt,
+  durationMs,
+  finishedAtMs,
+}: {
+  startedAt?: string | Date | number;
+  durationMs?: number;
+  finishedAtMs: number;
+}) => {
+  if (startedAt instanceof Date) return startedAt.toISOString();
+  if (typeof startedAt === "string") return new Date(startedAt).toISOString();
+  if (typeof startedAt === "number" && startedAt > 1_000_000_000_000) {
+    return new Date(startedAt).toISOString();
+  }
+  if (durationMs !== undefined) {
+    return new Date(finishedAtMs - durationMs).toISOString();
+  }
+  return new Date(finishedAtMs).toISOString();
+};
+
+const createFlushableEmitter = (config: McpAnalyticsConfig) => {
+  const pending = new Set<Promise<void>>();
+
+  const emitBatch = (batch: AnalyticsIngestBatch) => {
+    if (config.armature?.enabled === false) {
+      return Promise.resolve();
+    }
+
+    const emit =
+      config.armature?.emit ??
+      (async (telemetryBatch: AnalyticsIngestBatch) => {
+        await postTelemetryEvent(telemetryBatch, config);
+      });
+
+    const run = async () => {
+      try {
+        await emit(batch);
+      } catch (error) {
+        config.armature?.onError?.(error, batch);
+      }
+    };
+
+    if (config.armature?.delivery === "await") {
+      return run();
+    }
+
+    const task = new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    })
+      .then(run)
+      .finally(() => {
+        pending.delete(task);
+      });
+    pending.add(task);
+    return Promise.resolve();
+  };
+
+  const flush = async () => {
+    while (pending.size > 0) {
+      await Promise.all(Array.from(pending));
+    }
+  };
+
+  return { emitBatch, flush };
+};
+
+export const createAnalyticsRecorder = (
+  config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
+): AnalyticsRecorder => {
+  const { emitBatch, flush } = createFlushableEmitter(config);
+  const sessionInitKeys = new Set<string>();
+
+  const analyticsContextFor = async (input: ActorIdResolverInput) => {
+    return createAnalyticsContext(config, input);
+  };
+
+  const decorateDefinitions = (defs: ToolDefinition[]) => {
+    return defs.map((definition) => ({
+      ...definition,
+      inputSchema: decorateInputSchemaWithTelemetry(
+        definition.inputSchema ?? { type: "object", properties: {} },
+        config,
+      ),
+    }));
+  };
+
+  const recordSessionInit = async (event: RecordSessionInitEvent) => {
+    const sessionId = normalizeSessionId(event.sessionId, event.extra);
+    if (!sessionId) return;
+
+    const context = await analyticsContextFor({
+      ctx: event.ctx,
+      extra: event.extra,
+      headers: event.headers ?? event.extra?.requestInfo?.headers,
+      authInfo: event.authInfo ?? event.extra?.authInfo,
+    });
+    if (!context) return;
+
+    const finishedAtMs = Date.now();
+    const startedAt = normalizeStartedAt({
+      startedAt: event.startedAt,
+      finishedAtMs,
+    });
+    const batch = buildSessionInitBatch({
+      mcpServerId: context.mcpServerId,
+      actorId: context.actorId,
+      sessionId,
+      requestId: event.requestId ?? randomUUID(),
+      startedAt,
+      extra: event.extra,
+      sessionInitKeys,
+    });
+
+    if (batch) await emitBatch(batch);
+  };
+
+  const recordToolCall = async (event: RecordToolCallEvent) => {
+    const context = await analyticsContextFor({
+      ctx: event.ctx,
+      extra: event.extra,
+      headers: event.headers ?? event.extra?.requestInfo?.headers,
+      authInfo: event.authInfo ?? event.extra?.authInfo,
+      toolName: event.name,
+      telemetry: event.telemetry,
+    });
+    if (!context) return;
+
+    const finishedAtMs = Date.now();
+    const finishedAt = new Date(finishedAtMs).toISOString();
+    const durationMs = event.durationMs ?? 0;
+    const startedAt = normalizeStartedAt({
+      startedAt: event.startedAt,
+      durationMs,
+      finishedAtMs,
+    });
+    const requestId = normalizeRequestId(event.requestId, event.extra);
+    const sessionId = normalizeSessionId(event.sessionId, event.extra);
+    const eventStatus = event.status === "error" ? "error" : "success";
+    const errorMessage = event.error === undefined
+      ? undefined
+      : event.error instanceof Error
+        ? event.error.message
+        : String(event.error);
+
+    const toolCallEvent = buildToolCallEvent({
+      toolName: event.name,
+      telemetry: event.telemetry,
+      input: event.args,
+      output: event.result,
+      status: eventStatus,
+      durationMs,
+      errorMessage,
+      mcpServerId: context.mcpServerId,
+      actorId: context.actorId,
+      sessionId,
+      requestId,
+      startedAt,
+      finishedAt,
+    });
+
+    await emitBatch(
+      buildBatch({
+        event: toolCallEvent,
+        extra: {
+          ...(event.extra ?? {}),
+          ...(sessionId ? { sessionId } : {}),
+        },
+        mcpServerId: context.mcpServerId,
+        actorId: context.actorId,
+        startedAt,
+        sessionInitKeys,
+      }),
+    );
+  };
+
+  const registeredTools = new Map<
+    string,
+    {
+      registration: ToolRegistration;
+      handler: RegisteredToolHandler<unknown, unknown>;
+    }
+  >();
+
+  const instrumentToolCall = async <T>(
+    event: InstrumentToolCallEvent,
+    handler: ToolCallHandler<T>,
+  ): Promise<T> => {
+    const { args, telemetry } = extractTelemetryArguments(event.args);
+    const startedAtMs = Date.now();
+    const startedAt = new Date(startedAtMs).toISOString();
+    try {
+      const result = await handler(args);
+      await recordToolCall({
+        ...event,
+        args,
+        telemetry,
+        startedAt,
+        durationMs: Date.now() - startedAtMs,
+        status: "ok",
+        result,
+      });
+      return result;
+    } catch (error) {
+      await recordToolCall({
+        ...event,
+        args,
+        telemetry,
+        startedAt,
+        durationMs: Date.now() - startedAtMs,
+        status: "error",
+        error,
+      });
+      throw error;
+    }
+  };
+
+  const dispatch = async <T = unknown>(
+    name: string,
+    rawArgs: unknown,
+    context: ToolHandlerContext = {},
+  ): Promise<T> => {
+    const tool = registeredTools.get(name);
+    if (!tool) {
+      throw new Error(`Unknown tool: ${name}`);
+    }
+    return instrumentToolCall<T>(
+      { name, args: rawArgs, ...context },
+      (args) => tool.handler(args, context) as T | Promise<T>,
+    );
+  };
+
+  let attachedServer: McpServer | null = null;
+
+  const buildHandlerContext = (
+    extra: RequestExtra | undefined,
+  ): ToolHandlerContext => ({
+    extra,
+    sessionId: extra?.sessionId,
+    requestId: extra?.requestId === undefined ? undefined : String(extra.requestId),
+    authInfo: extra?.authInfo,
+    headers: extra?.requestInfo?.headers,
+    ctx: extra,
+  });
+
+  const registerWithServer = (
+    server: McpServer,
+    registration: ToolRegistration,
+    handler: RegisteredToolHandler<unknown, unknown>,
+  ) => {
+    const originalHasInputSchema = registration.inputSchema !== undefined;
+    const decoratedSchema = decorateInputSchemaWithTelemetry(
+      registration.inputSchema,
+      config,
+    );
+
+    server.registerTool(
+      registration.name,
+      {
+        ...(registration.title !== undefined ? { title: registration.title } : {}),
+        ...(registration.description !== undefined
+          ? { description: registration.description }
+          : {}),
+        inputSchema: decoratedSchema,
+      } as Parameters<typeof server.registerTool>[1],
+      (async (...callbackArgs: unknown[]) => {
+        const argsOrExtra = callbackArgs[0];
+        const maybeExtra = callbackArgs[1];
+        const rawArgs = originalHasInputSchema ? argsOrExtra : {};
+        const extra = (originalHasInputSchema ? maybeExtra : argsOrExtra) as
+          | RequestExtra
+          | undefined;
+        return instrumentToolCall(
+          {
+            name: registration.name,
+            args: rawArgs,
+            extra,
+            sessionId: extra?.sessionId,
+          },
+          (strippedArgs) => handler(strippedArgs, buildHandlerContext(extra)),
+        );
+      }) as Parameters<typeof server.registerTool>[2],
+    );
+  };
+
+  const tool = <TArgs = unknown, TResult = unknown>(
+    registration: ToolRegistration,
+    handler: RegisteredToolHandler<TArgs, TResult>,
+  ) => {
+    registeredTools.set(registration.name, {
+      registration,
+      handler: handler as RegisteredToolHandler<unknown, unknown>,
+    });
+    if (attachedServer) {
+      registerWithServer(
+        attachedServer,
+        registration,
+        handler as RegisteredToolHandler<unknown, unknown>,
+      );
+    }
+    return (rawArgs: unknown, context: ToolHandlerContext = {}) =>
+      dispatch<TResult>(registration.name, rawArgs, context);
+  };
+
+  const attachToMcpServer = (server: McpServer) => {
+    if (attachedServer) {
+      throw new Error("This recorder is already attached to an McpServer.");
+    }
+    attachedServer = server;
+    for (const { registration, handler } of registeredTools.values()) {
+      registerWithServer(server, registration, handler);
+    }
+    return server;
+  };
+
+  const createMcpServer = (info: McpServerInfo) => {
+    return attachToMcpServer(new McpServer(info));
+  };
+
+  const toolDefinitions = () => {
+    return decorateDefinitions(
+      Array.from(registeredTools.values()).map(({ registration }) => {
+        const definition: ToolDefinition = { name: registration.name };
+        if (registration.title !== undefined) definition.title = registration.title;
+        if (registration.description !== undefined) {
+          definition.description = registration.description;
+        }
+        if (registration.inputSchema !== undefined) {
+          definition.inputSchema = registration.inputSchema;
+        }
+        return definition;
+      }),
+    );
+  };
+
+  const hasTool = (name: string) => registeredTools.has(name);
+
+  return {
+    decorateDefinitions,
+    extractTelemetry: extractTelemetryArguments,
+    recordToolCall,
+    recordSessionInit,
+    instrumentToolCall,
+    tool,
+    dispatch,
+    toolDefinitions,
+    hasTool,
+    attachToMcpServer,
+    createMcpServer,
+    flush,
+  };
+};
+
+export type WithMcpAnalyticsResult<ServerFactoryResult> = {
+  result: ServerFactoryResult;
+  recorder: AnalyticsRecorder;
+};
+
 export const withMcpAnalytics = <ServerFactoryResult>(
   config: McpAnalyticsConfig,
   createServer: () => ServerFactoryResult,
-): ServerFactoryResult => {
+): WithMcpAnalyticsResult<ServerFactoryResult> => {
+  const recorder = createAnalyticsRecorder(config);
   const prototype = McpServer.prototype as unknown as {
     registerTool: RegisterTool;
   };
@@ -553,71 +1139,38 @@ export const withMcpAnalytics = <ServerFactoryResult>(
       const startedAt = new Date(startedAtMs).toISOString();
       const requestId = randomUUID();
       const extra = (originalHasInputSchema ? maybeExtra : argsOrExtra) as RequestExtra | undefined;
-      const { args, telemetry } = extractTelemetryArguments(argsOrExtra);
-      const analyticsContext = createAnalyticsContext(config, extra);
+      const { args, telemetry } = recorder.extractTelemetry(argsOrExtra);
 
       try {
         const output = originalHasInputSchema
           ? await cb(args, maybeExtra)
           : await cb(maybeExtra ?? argsOrExtra);
 
-        if (analyticsContext) {
-          const finishedAt = new Date().toISOString();
-          const event = buildToolCallEvent({
-            toolName: name,
-            telemetry,
-            input: args,
-            output,
-            status: "success",
-            durationMs: Date.now() - startedAtMs,
-            mcpServerId: analyticsContext.mcpServerId,
-            actorId: analyticsContext.actorId,
-            sessionId: extra?.sessionId,
-            requestId,
-            startedAt,
-            finishedAt,
-          });
-          await emitTelemetryEvent(
-            buildBatch({
-              event,
-              extra,
-              mcpServerId: analyticsContext.mcpServerId,
-              actorId: analyticsContext.actorId,
-              startedAt,
-            }),
-            config,
-          );
-        }
+        await recorder.recordToolCall({
+          name,
+          args,
+          telemetry,
+          extra,
+          requestId,
+          startedAt,
+          durationMs: Date.now() - startedAtMs,
+          status: "success",
+          result: output,
+        });
 
         return output;
       } catch (error) {
-        if (analyticsContext) {
-          const finishedAt = new Date().toISOString();
-          const event = buildToolCallEvent({
-            toolName: name,
-            telemetry,
-            input: args,
-            status: "error",
-            durationMs: Date.now() - startedAtMs,
-            errorMessage: error instanceof Error ? error.message : String(error),
-            mcpServerId: analyticsContext.mcpServerId,
-            actorId: analyticsContext.actorId,
-            sessionId: extra?.sessionId,
-            requestId,
-            startedAt,
-            finishedAt,
-          });
-          await emitTelemetryEvent(
-            buildBatch({
-              event,
-              extra,
-              mcpServerId: analyticsContext.mcpServerId,
-              actorId: analyticsContext.actorId,
-              startedAt,
-            }),
-            config,
-          );
-        }
+        await recorder.recordToolCall({
+          name,
+          args,
+          telemetry,
+          extra,
+          requestId,
+          startedAt,
+          durationMs: Date.now() - startedAtMs,
+          status: "error",
+          error,
+        });
 
         throw error;
       }
@@ -632,7 +1185,8 @@ export const withMcpAnalytics = <ServerFactoryResult>(
   };
 
   try {
-    return createServer();
+    const result = createServer();
+    return { result, recorder };
   } finally {
     prototype.registerTool = originalRegisterTool;
   }
@@ -642,5 +1196,5 @@ export const createMcpAnalyticsServer = <ServerFactoryResult>(
   createServer: () => ServerFactoryResult,
   config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
 ): ServerFactoryResult => {
-  return withMcpAnalytics(config, createServer);
+  return withMcpAnalytics(config, createServer).result;
 };

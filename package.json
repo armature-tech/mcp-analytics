@@ -10,6 +10,7 @@
     "dev:server": "tsx experimental/mock-env/mock-autumn-mcp-server.ts",
     "demo": "tsx experimental/mock-env/demo-client.ts",
     "demo:instrumented": "tsx experimental/mock-env/instrumented-demo-client.ts",
+    "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

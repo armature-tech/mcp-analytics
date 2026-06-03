@@ -9,9 +9,12 @@ Set the project's **Root Directory** to `experimental/vercel-demo`. Vercel disco
 ## Endpoints
 
 - `GET /api/health` — readiness check.
-- `POST /api/mcp` — Streamable HTTP MCP transport, serving the instrumented demo server in `demo-mcp-server.ts`.
+- `POST /api/mcp` — Streamable HTTP MCP transport, serving the instrumented `McpServer` in `demo-mcp-server.ts` via `createMcpAnalyticsServer`.
+- `POST /api/mcp-dispatcher` — hand-rolled JSON-RPC dispatcher in `dispatcher-mcp-handler.ts`, exercising `createAnalyticsRecorder` directly. Both endpoints expose the same `lookup_customer_note` tool so analytics output is comparable across integration styles.
 
 The demo exposes a single tool, `lookup_customer_note`, which returns a hardcoded note for smoke tests.
+
+The dispatcher endpoint accepts a `Bearer <organizationId>:<userProfileId>` header to populate the per-request context; the recorder derives the actor id from `userProfileId`. Pass an `mcp-session-id` header to control the session id (otherwise the handler generates one).
 
 ## Analytics environment variables
 
