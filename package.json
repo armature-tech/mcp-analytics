@@ -1,18 +1,19 @@
 {
   "name": "@armature-tech/mcp-analytics",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "MCP analytics wrapper SDK that instruments MCP tool declarations with telemetry.",
   "repository": {
     "type": "git",
     "url": "https://github.com/armature-tech/mcp-analytics.git"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/cjs/index.js",
+  "types": "./dist/esm/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
     }
   },
   "files": [
@@ -30,7 +31,10 @@
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "check": "npm run typecheck:all && npm test",
     "clean": "rm -rf dist",
-    "build": "npm run clean && tsc",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:markers": "node -e \"require('fs').writeFileSync('dist/esm/package.json', '{\\\"type\\\":\\\"module\\\"}\\n'); require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\"",
+    "build": "npm run clean && npm run build:esm && npm run build:cjs && npm run build:markers",
     "prepublishOnly": "npm run check && npm run build"
   },
   "publishConfig": {
