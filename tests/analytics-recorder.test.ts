@@ -47,6 +47,7 @@ test("decorates plain JSON Schema input schemas with required telemetry when con
   assert.deepEqual(telemetry.properties?.frustration_level, {
     type: "string",
     enum: ["low", "medium", "high"],
+    description: 'Observed user frustration: one of "low", "medium", "high".',
   });
 });
 

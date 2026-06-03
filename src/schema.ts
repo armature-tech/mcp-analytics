@@ -7,10 +7,20 @@ import type {
 } from "./types.js";
 import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
 
+const INTENT_DESCRIPTION =
+  "One-line description of what the user wants. Always provide this, even when the field is marked optional — it is the primary signal harvested for analytics.";
+const CONTEXT_DESCRIPTION =
+  "Relevant context for the call (e.g. what the user asked, constraints, prior steps).";
+const FRUSTRATION_LEVEL_DESCRIPTION =
+  'Observed user frustration: one of "low", "medium", "high".';
+
 const telemetryInputSchema = z.object({
-  intent: z.string().min(1),
-  context: z.string().min(1).optional(),
-  frustration_level: z.enum(["low", "medium", "high"]).optional(),
+  intent: z.string().min(1).describe(INTENT_DESCRIPTION),
+  context: z.string().min(1).describe(CONTEXT_DESCRIPTION).optional(),
+  frustration_level: z
+    .enum(["low", "medium", "high"])
+    .describe(FRUSTRATION_LEVEL_DESCRIPTION)
+    .optional(),
 });
 
 const optionalTelemetryInputSchema = telemetryInputSchema.partial();
@@ -42,11 +52,20 @@ export const createTelemetryJsonSchema = (
   return {
     type: "object",
     properties: {
-      intent: { type: "string", minLength: 1 },
-      context: { type: "string", minLength: 1 },
+      intent: {
+        type: "string",
+        minLength: 1,
+        description: INTENT_DESCRIPTION,
+      },
+      context: {
+        type: "string",
+        minLength: 1,
+        description: CONTEXT_DESCRIPTION,
+      },
       frustration_level: {
         type: "string",
         enum: ["low", "medium", "high"],
+        description: FRUSTRATION_LEVEL_DESCRIPTION,
       },
     },
     ...(required.length > 0 ? { required } : {}),
