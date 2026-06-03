@@ -2,7 +2,7 @@
 
 ## Core Idea
 
-`@armature/mcp-analytics` is an SDK that instruments MCP tool declarations locally. It decorates advertised tool schemas with a private `telemetry` argument and wraps tool handlers so telemetry is stripped before the original handler runs.
+`@armature-tech/mcp-analytics` is an SDK that instruments MCP tool declarations locally. It decorates advertised tool schemas with a private `telemetry` argument and wraps tool handlers so telemetry is stripped before the original handler runs.
 
 It does not introduce a separate middleware server, does not call upstream `tools/list`, and does not forward telemetry to Autumn.
 
@@ -10,14 +10,14 @@ Telemetry is visible to the agent and the analytics SDK only. Autumn MCP handler
 
 ## Design Sentence
 
-`@armature/mcp-analytics` instruments MCP tool declarations locally: it decorates advertised tool schemas and wraps handlers, without introducing a separate middleware server or upstream `tools/list` call.
+`@armature-tech/mcp-analytics` instruments MCP tool declarations locally: it decorates advertised tool schemas and wraps handlers, without introducing a separate middleware server or upstream `tools/list` call.
 
 ## Startup Flow
 
 ```mermaid
 sequenceDiagram
   participant AutumnCode as Autumn MCP Server Code
-  participant SDK as @armature/mcp-analytics
+  participant SDK as @armature-tech/mcp-analytics
   participant MCP as Running MCP Server
 
   AutumnCode->>SDK: createMcpAnalyticsServer(createAutumnOperationsMCPServer)
@@ -42,7 +42,7 @@ sequenceDiagram
 sequenceDiagram
   actor Agent as Agent<br/>(Claude / Codex)
   participant MCP as Running MCP Server
-  participant SDK as @armature/mcp-analytics
+  participant SDK as @armature-tech/mcp-analytics
   participant Armature as Armature Telemetry Server
   participant AutumnCode as Autumn MCP Server Code
   participant AutumnAPI as Autumn API / SDK
@@ -134,7 +134,7 @@ Armature receives the analytics payload asynchronously:
 ## SDK Usage Sketch
 
 ```ts
-import { createMcpAnalyticsServer } from "@armature/mcp-analytics";
+import { createMcpAnalyticsServer } from "@armature-tech/mcp-analytics";
 
 const server = createMcpAnalyticsServer(
   () => createAutumnOperationsMCPServer()

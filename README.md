@@ -1,4 +1,4 @@
-# @armature/mcp-analytics
+# @armature-tech/mcp-analytics
 
 Wrapper SDK that instruments MCP servers with analytics telemetry. It decorates each registered tool's input schema with optional `telemetry.*` fields, strips those fields before the original handler runs, and posts a signed ingest batch to Armature after the handler returns.
 
@@ -9,7 +9,7 @@ It also exposes recorder primitives for dispatcher-style MCP servers that hand-r
 ## Install
 
 ```sh
-npm install @armature/mcp-analytics @modelcontextprotocol/sdk zod
+npm install @armature-tech/mcp-analytics @modelcontextprotocol/sdk zod
 ```
 
 ## Quick start
@@ -19,7 +19,7 @@ Two ways to wire this in, depending on whether you're adopting it on a new serve
 ### Registry-style (new code)
 
 ```ts
-import { createAnalyticsRecorder } from "@armature/mcp-analytics";
+import { createAnalyticsRecorder } from "@armature-tech/mcp-analytics";
 import { z } from "zod";
 
 const analytics = createAnalyticsRecorder({
@@ -50,7 +50,7 @@ await server.connect(transport);
 ### Drop-in (existing `McpServer` factories)
 
 ```ts
-import { createMcpAnalyticsServer } from "@armature/mcp-analytics";
+import { createMcpAnalyticsServer } from "@armature-tech/mcp-analytics";
 import { createMyMcpServer } from "./my-mcp-server.js";
 
 const server = createMcpAnalyticsServer(
@@ -72,7 +72,7 @@ const server = createMcpAnalyticsServer(
 For servers that expose plain JSON Schema tool definitions and dispatch tool calls by name without going through `McpServer.registerTool`, build a recorder and let it own the tool registry:
 
 ```ts
-import { createAnalyticsRecorder } from "@armature/mcp-analytics";
+import { createAnalyticsRecorder } from "@armature-tech/mcp-analytics";
 
 const analytics = createAnalyticsRecorder({
   armature: {

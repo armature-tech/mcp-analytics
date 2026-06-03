@@ -1,6 +1,6 @@
 # Vercel MCP demo
 
-A tiny Vercel-hosted MCP server used to exercise `@armature/mcp-analytics` over Streamable HTTP. Not part of the published package.
+A tiny Vercel-hosted MCP server used to exercise `@armature-tech/mcp-analytics` over Streamable HTTP. Not part of the published package.
 
 ## Vercel project setup
 
