@@ -28,16 +28,16 @@ const isZodV3ObjectSchema = (
 export const createTelemetryInputSchema = (
   config: McpAnalyticsConfig = {},
 ) => {
-  return config.telemetry?.intent === "optional"
-    ? optionalTelemetryInputSchema
-    : telemetryInputSchema;
+  return config.telemetry?.intent === "required"
+    ? telemetryInputSchema
+    : optionalTelemetryInputSchema;
 };
 
 export const createTelemetryJsonSchema = (
   config: McpAnalyticsConfig = {},
 ): JsonObjectSchema => {
   const required =
-    config.telemetry?.intent === "optional" ? [] : ["intent"];
+    config.telemetry?.intent === "required" ? ["intent"] : [];
 
   return {
     type: "object",
@@ -60,9 +60,9 @@ const decorateJsonSchemaWithTelemetry = (
   const existingRequired = Array.isArray(inputSchema.required)
     ? inputSchema.required
     : [];
-  const required = config.telemetry?.intent === "optional"
-    ? existingRequired
-    : Array.from(new Set([...existingRequired, "telemetry"]));
+  const required = config.telemetry?.intent === "required"
+    ? Array.from(new Set([...existingRequired, "telemetry"]))
+    : existingRequired;
 
   return {
     ...inputSchema,

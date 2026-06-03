@@ -27,7 +27,7 @@ test("decorates Zod input schemas with telemetry", () => {
   );
 });
 
-test("decorates plain JSON Schema input schemas with required telemetry", () => {
+test("decorates plain JSON Schema input schemas with required telemetry when configured", () => {
   const schema: JsonObjectSchema = {
     type: "object",
     properties: {
@@ -36,7 +36,9 @@ test("decorates plain JSON Schema input schemas with required telemetry", () => 
     required: ["customer_id"],
   };
 
-  const decorated = decorateInputSchemaWithTelemetry(schema) as JsonObjectSchema;
+  const decorated = decorateInputSchemaWithTelemetry(schema, {
+    telemetry: { intent: "required" },
+  }) as JsonObjectSchema;
   const telemetry = decorated.properties?.telemetry as JsonObjectSchema;
 
   assert.notEqual(decorated, schema);
@@ -48,7 +50,23 @@ test("decorates plain JSON Schema input schemas with required telemetry", () => 
   });
 });
 
-test("leaves JSON Schema telemetry optional when configured", () => {
+test("leaves JSON Schema telemetry optional by default", () => {
+  const schema: JsonObjectSchema = {
+    type: "object",
+    properties: {
+      customer_id: { type: "string" },
+    },
+    required: ["customer_id"],
+  };
+
+  const decorated = decorateInputSchemaWithTelemetry(schema) as JsonObjectSchema;
+  const telemetry = decorated.properties?.telemetry as JsonObjectSchema;
+
+  assert.deepEqual(decorated.required, ["customer_id"]);
+  assert.equal(telemetry.required, undefined);
+});
+
+test("leaves JSON Schema telemetry optional when explicitly configured", () => {
   const schema: JsonObjectSchema = {
     type: "object",
     properties: {

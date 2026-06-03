@@ -148,15 +148,15 @@ await recorder.flush();
 
 Each tool's `inputSchema` gains a `telemetry` object:
 
-- `intent` — short string describing why the agent is calling the tool (required by default)
+- `intent` — short string describing why the agent is calling the tool (optional by default)
 - `context` — optional free-form context
 - `frustration_level` — optional `"low" | "medium" | "high"`
 
-Set `telemetry.intent = "optional"` in config if you don't want `intent` to be required:
+Set `telemetry.intent = "required"` in config if you want to force agents to supply an `intent` with every call:
 
 ```ts
 createMcpAnalyticsServer(createMyMcpServer, {
-  telemetry: { intent: "optional" },
+  telemetry: { intent: "required" },
 });
 ```
 
@@ -173,7 +173,7 @@ After each tool call (success or error), the SDK posts a signed batch to `endpoi
 ```ts
 type McpAnalyticsConfig = {
   telemetry?: {
-    intent?: "required" | "optional"; // default "required"
+    intent?: "required" | "optional"; // default "optional"
   };
   armature?: {
     endpointUrl?: string;     // default reads ANALYTICS_INGEST_URL

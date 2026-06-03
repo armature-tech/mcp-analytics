@@ -8,7 +8,7 @@ import { headerValue, readEnv } from "./utils.js";
 
 export const defaultMcpAnalyticsConfig = {
   telemetry: {
-    intent: "required",
+    intent: "optional",
   },
   armature: {
     endpointUrl: "http://127.0.0.1:8787/api/mcp-analytics/ingest",

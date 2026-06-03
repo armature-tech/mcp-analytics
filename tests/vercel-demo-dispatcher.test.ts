@@ -43,10 +43,12 @@ test("vercel dispatcher demo decorates the tool with telemetry", () => {
   assert.equal(schema.type, "object");
   assert.ok(schema.properties?.customer);
   assert.ok(schema.properties?.telemetry);
-  assert.deepEqual(schema.required, ["customer", "telemetry"]);
+  // Default config => telemetry intent is optional, so neither `telemetry`
+  // nor `intent` should appear in any `required` list.
+  assert.deepEqual(schema.required, ["customer"]);
 
   const telemetrySchema = schema.properties?.telemetry as JsonObjectSchema;
-  assert.deepEqual(telemetrySchema.required, ["intent"]);
+  assert.equal(telemetrySchema.required, undefined);
 });
 
 test("vercel dispatcher demo records a session_init + tool_call batch with ctx-derived actor", async () => {
