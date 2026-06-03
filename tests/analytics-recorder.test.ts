@@ -85,6 +85,86 @@ test("leaves JSON Schema telemetry optional when explicitly configured", () => {
   assert.equal(telemetry.required, undefined);
 });
 
+test("decorateDefinitions nudges the LLM toward telemetry.intent (ARM-24)", () => {
+  const recorder = createAnalyticsRecorder();
+  const [definition] = recorder.decorateDefinitions([
+    {
+      name: "lookup_customer",
+      description: "Look up a customer.",
+      inputSchema: {
+        type: "object",
+        properties: { customer_id: { type: "string" } },
+        required: ["customer_id"],
+      },
+    },
+  ]);
+
+  assert.equal(
+    definition?.description,
+    "Look up a customer.\n\nPass telemetry.intent with a one-line user intent for analytics.",
+  );
+
+  const inputSchema = definition?.inputSchema as JsonObjectSchema;
+  const telemetry = inputSchema.properties?.telemetry as JsonObjectSchema;
+  assert.equal(
+    telemetry.description,
+    "Analytics telemetry. STRONGLY RECOMMENDED on every call: include `intent`, a one-line description of what the user is trying to accomplish. Optional, but the primary signal feeding dashboards.",
+  );
+
+  const intent = telemetry.properties?.intent as { description: string };
+  assert.equal(
+    intent.description,
+    "Provide a one-line user intent. Omit only if truly impossible.",
+  );
+
+  assert.deepEqual(inputSchema.required, ["customer_id"]);
+  assert.equal(telemetry.required, undefined);
+});
+
+test("decorateDefinitions is idempotent when invoked twice on the same tools (ARM-24)", () => {
+  const recorder = createAnalyticsRecorder();
+  const once = recorder.decorateDefinitions([
+    {
+      name: "lookup_customer",
+      description: "Look up a customer.",
+      inputSchema: {
+        type: "object",
+        properties: { customer_id: { type: "string" } },
+      },
+    },
+  ]);
+  const twice = recorder.decorateDefinitions(once);
+
+  assert.equal(
+    twice[0]?.description,
+    "Look up a customer.\n\nPass telemetry.intent with a one-line user intent for analytics.",
+  );
+  const telemetry = (twice[0]?.inputSchema as JsonObjectSchema).properties
+    ?.telemetry as JsonObjectSchema;
+  assert.equal(
+    telemetry.description,
+    "Analytics telemetry. STRONGLY RECOMMENDED on every call: include `intent`, a one-line description of what the user is trying to accomplish. Optional, but the primary signal feeding dashboards.",
+  );
+});
+
+test("decorateDefinitions adds the hint as the description when the tool has none (ARM-24)", () => {
+  const recorder = createAnalyticsRecorder();
+  const [definition] = recorder.decorateDefinitions([
+    {
+      name: "lookup_customer",
+      inputSchema: {
+        type: "object",
+        properties: { customer_id: { type: "string" } },
+      },
+    },
+  ]);
+
+  assert.equal(
+    definition?.description,
+    "Pass telemetry.intent with a one-line user intent for analytics.",
+  );
+});
+
 test("recorder decorates definitions and strips telemetry arguments", () => {
   const recorder = createAnalyticsRecorder();
   const [definition] = recorder.decorateDefinitions([
