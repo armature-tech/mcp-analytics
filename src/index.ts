@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -110,7 +111,7 @@ export type RecordToolCallEvent = {
   requestId?: string;
   startedAt?: string | Date | number;
   durationMs?: number;
-  status: "ok" | "success" | "error";
+  status: "ok" | "error";
   result?: unknown;
   error?: unknown;
 };
@@ -474,7 +475,7 @@ export const buildToolCallEvent = ({
   telemetry?: TelemetryArgs;
   input: unknown;
   output?: unknown;
-  status: "success" | "error";
+  status: "ok" | "error";
   durationMs: number;
   errorMessage?: string;
   mcpServerId: string;
@@ -499,7 +500,7 @@ export const buildToolCallEvent = ({
     started_at: startedAt,
     finished_at: finishedAt,
     duration_ms: durationMs,
-    ok: status === "success",
+    ok: status === "ok",
     error: errorMessage ?? null,
     metadata: {
       tool_name: toolName,
@@ -685,6 +686,20 @@ export const postTelemetryEvent = async (
   }
 };
 
+const reportEmitError = (
+  error: unknown,
+  batch: AnalyticsIngestBatch,
+  config: McpAnalyticsConfig,
+) => {
+  const onError = config.armature?.onError;
+  if (onError) {
+    onError(error, batch);
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.warn("[mcp-analytics] telemetry emit failed:", error);
+};
+
 export const emitTelemetryEvent = (
   batch: AnalyticsIngestBatch,
   config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
@@ -703,7 +718,7 @@ export const emitTelemetryEvent = (
     try {
       await emit(batch);
     } catch (error) {
-      config.armature?.onError?.(error, batch);
+      reportEmitError(error, batch, config);
     }
   };
 
@@ -787,7 +802,7 @@ const createFlushableEmitter = (config: McpAnalyticsConfig) => {
       try {
         await emit(batch);
       } catch (error) {
-        config.armature?.onError?.(error, batch);
+        reportEmitError(error, batch, config);
       }
     };
 
@@ -886,7 +901,6 @@ export const createAnalyticsRecorder = (
     });
     const requestId = normalizeRequestId(event.requestId, event.extra);
     const sessionId = normalizeSessionId(event.sessionId, event.extra);
-    const eventStatus = event.status === "error" ? "error" : "success";
     const errorMessage = event.error === undefined
       ? undefined
       : event.error instanceof Error
@@ -898,7 +912,7 @@ export const createAnalyticsRecorder = (
       telemetry: event.telemetry,
       input: event.args,
       output: event.result,
-      status: eventStatus,
+      status: event.status,
       durationMs,
       errorMessage,
       mcpServerId: context.mcpServerId,
@@ -1106,22 +1120,35 @@ export type WithMcpAnalyticsResult<ServerFactoryResult> = {
   recorder: AnalyticsRecorder;
 };
 
-export const withMcpAnalytics = <ServerFactoryResult>(
-  config: McpAnalyticsConfig,
-  createServer: () => ServerFactoryResult,
-): WithMcpAnalyticsResult<ServerFactoryResult> => {
-  const recorder = createAnalyticsRecorder(config);
+type WithAnalyticsContext = {
+  config: McpAnalyticsConfig;
+  recorder: AnalyticsRecorder;
+};
+
+const withAnalyticsStorage = new AsyncLocalStorage<WithAnalyticsContext>();
+let prototypePatchInstalled = false;
+
+const installPrototypePatchOnce = () => {
+  if (prototypePatchInstalled) return;
+  prototypePatchInstalled = true;
+
   const prototype = McpServer.prototype as unknown as {
     registerTool: RegisterTool;
   };
   const originalRegisterTool = prototype.registerTool;
 
-  prototype.registerTool = function registerToolWithAnalytics(
+  prototype.registerTool = function patchedRegisterTool(
     this: McpServer,
     name: string,
     toolConfig: ToolConfig,
     cb: ToolCallback,
   ) {
+    const ctx = withAnalyticsStorage.getStore();
+    if (!ctx) {
+      return originalRegisterTool.call(this, name, toolConfig, cb);
+    }
+
+    const { config, recorder } = ctx;
     const originalHasInputSchema = toolConfig.inputSchema !== undefined;
     const instrumentedConfig = {
       ...toolConfig,
@@ -1154,7 +1181,7 @@ export const withMcpAnalytics = <ServerFactoryResult>(
           requestId,
           startedAt,
           durationMs: Date.now() - startedAtMs,
-          status: "success",
+          status: "ok",
           result: output,
         });
 
@@ -1183,13 +1210,19 @@ export const withMcpAnalytics = <ServerFactoryResult>(
       wrappedCallback,
     );
   };
+};
 
-  try {
-    const result = createServer();
-    return { result, recorder };
-  } finally {
-    prototype.registerTool = originalRegisterTool;
-  }
+export const withMcpAnalytics = <ServerFactoryResult>(
+  config: McpAnalyticsConfig,
+  createServer: () => ServerFactoryResult,
+): WithMcpAnalyticsResult<ServerFactoryResult> => {
+  const recorder = createAnalyticsRecorder(config);
+  installPrototypePatchOnce();
+  const result = withAnalyticsStorage.run(
+    { config, recorder },
+    createServer,
+  );
+  return { result, recorder };
 };
 
 export const createMcpAnalyticsServer = <ServerFactoryResult>(
