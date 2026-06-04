@@ -3,10 +3,26 @@
   "version": "0.2.4",
   "type": "module",
   "description": "MCP analytics wrapper SDK that instruments MCP tool declarations with telemetry.",
+  "license": "Apache-2.0",
+  "author": "Armature <support@armature.tech>",
+  "homepage": "https://github.com/armature-tech/mcp-analytics#readme",
+  "bugs": {
+    "url": "https://github.com/armature-tech/mcp-analytics/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/armature-tech/mcp-analytics.git"
+    "url": "git+https://github.com/armature-tech/mcp-analytics.git"
   },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "analytics",
+    "telemetry",
+    "observability",
+    "instrumentation",
+    "armature",
+    "mastra"
+  ],
   "main": "./dist/cjs/index.js",
   "types": "./dist/cjs/index.d.ts",
   "exports": {
@@ -34,7 +50,9 @@
   "files": [
     "dist",
     "README.md",
-    "SKILL.md"
+    "SKILL.md",
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "dev:armature": "tsx experimental/mock-env/mock-armature-server.ts",
@@ -54,7 +72,8 @@
     "prepublishOnly": "npm run check && npm run build"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.0",
