@@ -332,6 +332,38 @@ const createTool = <TInput, TOutput>(
   def: MastraCreatedTool<TInput, TOutput>,
 ): MastraCreatedTool<TInput, TOutput> => def;
 
+test("wrapMastraTools preserves the input tool-map type (no `as unknown as MastraToolMap` cast needed)", () => {
+  // Mirrors Autumn's `createRawAutumnOperationTools()` shape: a narrowly-typed
+  // `Record<string, MastraCreatedTool<TIn, TOut>>` that previous Mastra
+  // integrators had to launder through `MastraToolMap` in both directions.
+  const createRawAutumnOperationTools = () => ({
+    lookup_customer: createTool({
+      id: "lookup_customer",
+      description: "Look up a customer.",
+      inputSchema: z.object({ customer_id: z.string() }),
+      execute: async (input) => ({ id: input.customer_id, name: "Ada" }),
+    }),
+    create_invoice: createTool({
+      id: "create_invoice",
+      description: "Create an invoice.",
+      inputSchema: z.object({ amount: z.number() }),
+      execute: async (input) => ({ invoice_id: `inv_${input.amount}` }),
+    }),
+  });
+
+  type AutumnTools = ReturnType<typeof createRawAutumnOperationTools>;
+  const wrapped: AutumnTools = wrapMastraTools(createRawAutumnOperationTools(), {
+    armature: { delivery: "await" },
+  });
+
+  // Each key on the input map is preserved on the output map at the type level —
+  // if wrapMastraTools regressed to returning `MastraToolMap`, these property
+  // reads against the narrowed-back type would still compile but the explicit
+  // `: AutumnTools` annotation above would fail typecheck.
+  assert.ok(wrapped.lookup_customer);
+  assert.ok(wrapped.create_invoice);
+});
+
 test("Mastra-shaped tool with narrower context assigns into wrapMastraTools without a cast (contravariance fix)", () => {
   // This is the call site that previously required
   //   wrapMastraTools(tools as unknown as Parameters<typeof wrapMastraTools>[0], ...)
@@ -418,6 +450,227 @@ test("Mastra-wrapped zod/v4 tool accepts calls that omit telemetry entirely (loo
 
   const parsed = schema.parse({ id: "x" });
   assert.deepEqual(parsed, { id: "x" });
+});
+
+test("default extraction reads sessionId/requestId/headers/authInfo from context.mcp.extra", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = makeRecorder(batches);
+
+  const tools: Record<string, MastraTool> = {
+    echo: {
+      id: "echo",
+      inputSchema: z.object({ msg: z.string() }),
+      execute: async (input) => input,
+    },
+  };
+
+  const wrapped = wrapMastraToolsWithRecorder(tools, recorder);
+  await wrapped.echo?.execute?.(
+    { msg: "hi", telemetry: { intent: "say hi" } },
+    {
+      mcp: {
+        extra: {
+          sessionId: "session-from-mcp-extra",
+          requestId: "req-7",
+          requestInfo: { headers: { "user-agent": "claude-test/1.0" } },
+          authInfo: { clientId: "client-from-mcp" },
+        },
+      },
+    },
+  );
+
+  const events = batches.flatMap((batch) => batch.events);
+  const toolCall = events.find((event) => event.kind === "tool_call");
+  assert.ok(toolCall);
+  assert.equal(toolCall?.session_id_hint, "session-from-mcp-extra");
+  const sessionInit = events.find((event) => event.kind === "session_init");
+  assert.ok(sessionInit);
+  assert.equal(sessionInit?.session_id_hint, "session-from-mcp-extra");
+  assert.equal(sessionInit?.metadata.client_name, "client-from-mcp");
+  assert.equal(sessionInit?.metadata.user_agent, "claude-test/1.0");
+});
+
+test("default extraction falls back to requestContext.get(\"mcp.extra\")", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = makeRecorder(batches);
+
+  const tools: Record<string, MastraTool> = {
+    echo: {
+      id: "echo",
+      inputSchema: z.object({ msg: z.string() }),
+      execute: async (input) => input,
+    },
+  };
+
+  const wrapped = wrapMastraToolsWithRecorder(tools, recorder);
+  const stored = {
+    sessionId: "session-via-requestContext",
+    requestInfo: { headers: { "user-agent": "via-request-context/2.0" } },
+    authInfo: { token: "secret-token" },
+  };
+  await wrapped.echo?.execute?.(
+    { msg: "hi" },
+    {
+      requestContext: {
+        get: (key: string) => (key === "mcp.extra" ? stored : undefined),
+      },
+    },
+  );
+
+  const events = batches.flatMap((batch) => batch.events);
+  const sessionInit = events.find((event) => event.kind === "session_init");
+  assert.ok(sessionInit);
+  assert.equal(sessionInit?.session_id_hint, "session-via-requestContext");
+  assert.equal(sessionInit?.metadata.user_agent, "via-request-context/2.0");
+});
+
+test("user-supplied resolveExtra layers on top of the default extraction", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = makeRecorder(batches);
+
+  const tools: Record<string, MastraTool> = {
+    echo: {
+      id: "echo",
+      inputSchema: z.object({ msg: z.string() }),
+      execute: async (input) => input,
+    },
+  };
+
+  const wrapped = wrapMastraToolsWithRecorder(tools, recorder, {}, {
+    resolveExtra: () => ({ sessionId: "user-override" }),
+  });
+  await wrapped.echo?.execute?.(
+    { msg: "hi" },
+    {
+      mcp: {
+        extra: {
+          sessionId: "from-mcp-extra",
+          requestInfo: { headers: { "user-agent": "kept-from-default/1.0" } },
+        },
+      },
+    },
+  );
+
+  const events = batches.flatMap((batch) => batch.events);
+  const toolCall = events.find((event) => event.kind === "tool_call");
+  assert.equal(toolCall?.session_id_hint, "user-override");
+  const sessionInit = events.find((event) => event.kind === "session_init");
+  assert.equal(sessionInit?.metadata.user_agent, "kept-from-default/1.0");
+});
+
+test("default extraction narrows authInfo to the four known fields and drops the rest", async () => {
+  // resolveActorSeed sees the extracted RequestExtra. If the extraction
+  // forwarded the full upstream object verbatim, `extra.authInfo` here would
+  // include the `internalUserRecord` / `scopes` keys — which would leak into
+  // any downstream consumer that reads from it.
+  const seen: { authInfo?: unknown; extraAuth?: unknown } = {};
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: ({ authInfo, extra }) => {
+        seen.authInfo = authInfo;
+        seen.extraAuth = extra?.authInfo;
+        return "x";
+      },
+      emit: () => {},
+    },
+  });
+
+  const tools: Record<string, MastraTool> = {
+    echo: {
+      id: "echo",
+      inputSchema: z.object({ msg: z.string() }),
+      execute: async (input) => input,
+    },
+  };
+
+  const wrapped = wrapMastraToolsWithRecorder(tools, recorder);
+  await wrapped.echo?.execute?.(
+    { msg: "hi" },
+    {
+      mcp: {
+        extra: {
+          authInfo: {
+            token: "tok_abc",
+            apiKey: "sk_secret",
+            internalUserRecord: { ssn: "should-be-dropped" },
+            scopes: ["should-also-be-dropped"],
+          },
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(seen.authInfo, { token: "tok_abc", apiKey: "sk_secret" });
+  assert.deepEqual(seen.extraAuth, { token: "tok_abc", apiKey: "sk_secret" });
+});
+
+test("apiKey on authInfo is used as the actor seed (alias)", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  const tools: Record<string, MastraTool> = {
+    echo: {
+      id: "echo",
+      inputSchema: z.object({ msg: z.string() }),
+      execute: async (input) => input,
+    },
+  };
+
+  const wrapped = wrapMastraToolsWithRecorder(tools, recorder);
+  await wrapped.echo?.execute?.(
+    { msg: "hi" },
+    { mcp: { extra: { authInfo: { apiKey: "sk_test_apikey" } } } },
+  );
+
+  // SHA-256 of "sk_test_apikey"
+  const expectedActorId =
+    "e48152c705977cd67bb424ba925c3bccb429c287a859da776c3c49d6f30d8e43";
+  const events = batches.flatMap((batch) => batch.events);
+  const toolCall = events.find((event) => event.kind === "tool_call");
+  assert.ok(toolCall);
+  assert.equal(toolCall?.actor_id, expectedActorId);
+});
+
+test("principalId on authInfo is used as the actor seed (alias) when no other field is present", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  const tools: Record<string, MastraTool> = {
+    echo: {
+      id: "echo",
+      inputSchema: z.object({ msg: z.string() }),
+      execute: async (input) => input,
+    },
+  };
+
+  const wrapped = wrapMastraToolsWithRecorder(tools, recorder);
+  await wrapped.echo?.execute?.(
+    { msg: "hi" },
+    { mcp: { extra: { authInfo: { principalId: "user_principal_123" } } } },
+  );
+
+  // SHA-256 of "user_principal_123"
+  const expectedActorId =
+    "01a74a89e9a5c2ea3abc1d090afd9fa4223898874276f3643b8650b7040f9d44";
+  const events = batches.flatMap((batch) => batch.events);
+  const toolCall = events.find((event) => event.kind === "tool_call");
+  assert.ok(toolCall);
+  assert.equal(toolCall?.actor_id, expectedActorId);
 });
 
 test("nudged JSON Schema also flows through wrapMastraTools for tools using JSON Schema inputSchema", async () => {

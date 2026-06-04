@@ -2,10 +2,12 @@ import { createAnalyticsRecorder } from "./recorder.js";
 import { decorateInputSchemaWithTelemetry } from "./schema.js";
 import type {
   AnalyticsRecorder,
+  HeaderBag,
   InternalMcpAnalyticsConfig,
   McpAnalyticsConfig,
   RequestExtra,
 } from "./types.js";
+import { isRecord } from "./utils.js";
 
 // `inputData` and `context` are `any` (not `unknown`) on purpose. Mastra's
 // `createTool({...}).execute` is typed
@@ -34,6 +36,96 @@ export type MastraAdapterOptions = McpAnalyticsConfig & {
   resolveExtra?: (mastraContext: unknown) => RequestExtra | undefined;
 };
 
+const readMcpExtra = (mastraContext: unknown): Record<string, unknown> | undefined => {
+  if (!isRecord(mastraContext)) return undefined;
+
+  // Direct path: context.mcp.extra (the second argument Mastra's MCPServer
+  // passes into `execute` for tools invoked over MCP).
+  const mcp = mastraContext.mcp;
+  if (isRecord(mcp) && isRecord(mcp.extra)) return mcp.extra;
+
+  // Fallback: context.requestContext.get("mcp.extra") — some Mastra setups
+  // route the MCP extra through RuntimeContext under that key.
+  const requestContext = mastraContext.requestContext;
+  if (
+    isRecord(requestContext) &&
+    typeof (requestContext as { get?: unknown }).get === "function"
+  ) {
+    const fromContext = (requestContext as { get: (k: string) => unknown }).get(
+      "mcp.extra",
+    );
+    if (isRecord(fromContext)) return fromContext;
+  }
+  return undefined;
+};
+
+export const defaultMastraResolveExtra = (
+  mastraContext: unknown,
+): RequestExtra | undefined => {
+  const mcpExtra = readMcpExtra(mastraContext);
+  if (!mcpExtra) return undefined;
+
+  const result: RequestExtra = {};
+
+  if (typeof mcpExtra.sessionId === "string" && mcpExtra.sessionId.length > 0) {
+    result.sessionId = mcpExtra.sessionId;
+  }
+  const requestId = mcpExtra.requestId;
+  if (typeof requestId === "string" || typeof requestId === "number") {
+    result.requestId = requestId;
+  }
+  if (isRecord(mcpExtra.requestInfo)) {
+    const headers = (mcpExtra.requestInfo as { headers?: unknown }).headers;
+    if (headers !== undefined) {
+      result.requestInfo = { headers: headers as HeaderBag };
+    }
+  }
+  if (isRecord(mcpExtra.authInfo)) {
+    // Narrow to the four fields `resolveActorSeed` / `buildSessionInitEvent`
+    // actually consume — don't forward arbitrary unrelated properties from a
+    // host-supplied object down the analytics pipeline.
+    const incoming = mcpExtra.authInfo as Record<string, unknown>;
+    const authInfo: NonNullable<RequestExtra["authInfo"]> = {};
+    if (typeof incoming.token === "string") authInfo.token = incoming.token;
+    if (typeof incoming.clientId === "string") authInfo.clientId = incoming.clientId;
+    if (typeof incoming.apiKey === "string") authInfo.apiKey = incoming.apiKey;
+    if (typeof incoming.principalId === "string") {
+      authInfo.principalId = incoming.principalId;
+    }
+    if (Object.keys(authInfo).length > 0) result.authInfo = authInfo;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+};
+
+const mergeExtra = (
+  base: RequestExtra | undefined,
+  override: RequestExtra | undefined,
+): RequestExtra | undefined => {
+  if (!base) return override;
+  if (!override) return base;
+  return {
+    ...base,
+    ...override,
+    ...(base.requestInfo || override.requestInfo
+      ? {
+          requestInfo: {
+            ...(base.requestInfo ?? {}),
+            ...(override.requestInfo ?? {}),
+          },
+        }
+      : {}),
+    ...(base.authInfo || override.authInfo
+      ? {
+          authInfo: {
+            ...(base.authInfo ?? {}),
+            ...(override.authInfo ?? {}),
+          },
+        }
+      : {}),
+  };
+};
+
 const wrapOneTool = (
   toolKey: string,
   tool: MastraTool,
@@ -53,7 +145,14 @@ const wrapOneTool = (
       : decorateInputSchemaWithTelemetry(tool.inputSchema, config);
 
   const wrappedExecute: MastraToolExecute = (inputData, mastraContext) => {
-    const extra = resolveExtra?.(mastraContext);
+    // Always extract standard Mastra MCP context (`context.mcp.extra` or the
+    // `requestContext.get("mcp.extra")` fallback). A user-supplied
+    // `resolveExtra` layers on top — its values win where both define a field,
+    // so it doubles as an override and an extension point.
+    const extra = mergeExtra(
+      defaultMastraResolveExtra(mastraContext),
+      resolveExtra?.(mastraContext),
+    );
     return recorder.instrumentToolCall(
       {
         name: toolName,
@@ -79,23 +178,31 @@ const wrapOneTool = (
   };
 };
 
-export const wrapMastraToolsWithRecorder = (
-  tools: MastraToolMap,
+// Generic over the input map so the return value keeps the customer's exact
+// tool-map type (e.g. `Record<string, AutumnTool>`). Without this, every Mastra
+// caller had to do `wrapMastraTools(myTools as unknown as MastraToolMap, ...) as
+// unknown as typeof myTools` because `MCPServer({ tools })` wants the narrower
+// type back. The `T extends MastraToolMap` constraint lets us still operate on
+// the values structurally — Mastra's `createTool({...})` shape is a strict
+// subtype of `MastraTool` (id/inputSchema/outputSchema/execute), so any tool map
+// passes the constraint without a cast.
+export const wrapMastraToolsWithRecorder = <T extends MastraToolMap>(
+  tools: T,
   recorder: AnalyticsRecorder,
   config: InternalMcpAnalyticsConfig = {},
   options: { resolveExtra?: MastraAdapterOptions["resolveExtra"] } = {},
-): MastraToolMap => {
+): T => {
   const out: MastraToolMap = {};
   for (const [key, tool] of Object.entries(tools)) {
     out[key] = wrapOneTool(key, tool, recorder, config, options.resolveExtra);
   }
-  return out;
+  return out as T;
 };
 
-export const wrapMastraTools = (
-  tools: MastraToolMap,
+export const wrapMastraTools = <T extends MastraToolMap>(
+  tools: T,
   options: MastraAdapterOptions = {},
-): MastraToolMap => {
+): T => {
   const { resolveExtra, ...config } = options;
   const recorder = createAnalyticsRecorder(config);
   return wrapMastraToolsWithRecorder(tools, recorder, config, { resolveExtra });
@@ -103,7 +210,7 @@ export const wrapMastraTools = (
 
 export type MastraAnalytics = {
   recorder: AnalyticsRecorder;
-  wrapTools: (tools: MastraToolMap) => MastraToolMap;
+  wrapTools: <T extends MastraToolMap>(tools: T) => T;
   flush: () => Promise<void>;
 };
 
@@ -114,7 +221,7 @@ export const createMastraAnalytics = (
   const recorder = createAnalyticsRecorder(config);
   return {
     recorder,
-    wrapTools: (tools) =>
+    wrapTools: <T extends MastraToolMap>(tools: T) =>
       wrapMastraToolsWithRecorder(tools, recorder, config, { resolveExtra }),
     flush: recorder.flush,
   };

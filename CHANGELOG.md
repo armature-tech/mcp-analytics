@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.0
+
+Drops the integration boilerplate every Mastra adopter (e.g. Autumn) had been writing around `wrapMastraTools`, adds a `instrumentMcpServerTools` helper for servers that can't use `createMcpAnalyticsServer`'s prototype-patching path, and broadens the default actor-seed resolution to cover two more common auth field names.
+
+### Mastra adapter: auto-extract standard MCP context
+
+`wrapMastraTools` and `wrapMastraToolsWithRecorder` now pull `sessionId`, `requestId`, `requestInfo.headers`, and `authInfo` straight out of Mastra's standard MCP context — `context.mcp.extra` (with `context.requestContext.get("mcp.extra")` as a fallback). Adopters no longer need an app-specific `resolveExtra` callback just to forward the fields Mastra already provides. The exported `defaultMastraResolveExtra` is the same function the adapter runs internally, available for callers that want to reuse it. An existing `resolveExtra` callback still works as an override / extension point — its return value is merged on top of the default extraction, per field (`authInfo.token` from the default and `authInfo.apiKey` from the callback are kept together; one doesn't wholesale-clobber the other). The `authInfo` cast at the extraction boundary is narrowed to only the four fields the SDK actually consumes (`token`, `clientId`, `apiKey`, `principalId`), so host-attached PII or internal IDs don't silently propagate through the analytics pipeline.
+
+### Actor-seed aliases: `apiKey`, `principalId`
+
+`resolveActorSeed` now also recognises `authInfo.apiKey` and `authInfo.principalId` as actor-seed inputs (alongside the existing `token` and `clientId`). Hosts whose auth shim exposes credentials under those names — Autumn is one — no longer need a custom `actorId` resolver just to map between the two. `RequestExtra.authInfo` gained the two optional fields to match.
+
+### Mastra adapter: generic over the input tool-map type
+
+`wrapMastraTools`, `wrapMastraToolsWithRecorder`, and `MastraAnalytics.wrapTools` are now `<T extends MastraToolMap>(tools: T) => T`. An Autumn-style `Record<string, MastraCreatedTool<...>>` round-trips through them without needing `as unknown as MastraToolMap` casts at the call site or on the return — the customer's narrow tool-map type is preserved end-to-end so the result drops straight into `new MCPServer({ tools })`.
+
+### New entry point: `instrumentMcpServerTools`
+
+For servers that already own both an `McpServer` instance and a tool registry (array or map), the new `instrumentMcpServerTools({ server, tools, config, mapTool })` helper decorates each tool's input schema with the telemetry block, strips telemetry before invoking the original handler, and emits analytics batches — by calling `server.registerTool(...)` directly on the caller-passed instance. No `McpServer.prototype` patching for the tool-registration path, so it survives pnpm virtual-peer layouts where `createMcpAnalyticsServer`'s patch can land on a different `@modelcontextprotocol/sdk` module copy than the customer's, and it removes the factory-function refactor `createMcpAnalyticsServer` requires. Two-overload surface makes `mapTool` required whenever the registry shape doesn't structurally satisfy `InstrumentedTool`, so custom registries can't compile cleanly without a mapper and then throw "handler is not a function" at runtime.
+
 ## 0.5.0
 
 Surfaced and fixed three regressions that prevented `createMcpAnalyticsServer(...)` from instrumenting servers that use the deprecated `server.tool(...)` overload, plus an API cleanup so customers cannot reach into telemetry behavior.

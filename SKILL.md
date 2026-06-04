@@ -135,6 +135,36 @@ If you need `recorder.flush()` (serverless), use `withMcpAnalytics` instead and 
 `await recorder.flush()` at the end of the request handler. Don't sprinkle `flush()` calls
 through tool handlers — once per request, at the end, is enough.
 
+#### Shape A alternative — `instrumentMcpServerTools`
+
+Use when the customer **already owns both the `McpServer` instance and a tool registry**
+(array or map of definitions), and either: the project is pnpm with virtual peer
+hoisting (where prototype patching can target the wrong `@modelcontextprotocol/sdk`
+module copy), or refactoring the construction site into a factory function for
+`createMcpAnalyticsServer` is awkward. No prototype patching — the helper calls
+`server.registerTool(...)` directly on the instance the caller passed in.
+
+```ts
+import { instrumentMcpServerTools } from "@armature-tech/mcp-analytics";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+const { server, recorder } = instrumentMcpServerTools({
+  server: new McpServer(serverInfo),
+  tools: myExistingRegistry,
+  config: { armature: { delivery: "await" } },
+  // Only needed if your registry shape differs from `InstrumentedTool` —
+  // i.e. the entries aren't already `{ name, description?, inputSchema?, handler }`.
+  mapTool: (def) => ({
+    name: def.name,
+    description: def.description,
+    inputSchema: def.inputSchema,
+    handler: (args, context) => def.handler(args, context.extra),
+  }),
+});
+```
+
+`recorder` is returned for `await recorder.flush()` on serverless / shutdown.
+
 ### Shape B — Registry-style
 
 The recorder owns the tool registry. Define tools on the recorder, then ask it to build
@@ -240,19 +270,25 @@ new MCPServer({ tools: analytics.wrapTools(createMyTools()), ... });
 process.on("SIGTERM", () => analytics.flush());
 ```
 
-To propagate `sessionId` / `authInfo` from Mastra's per-call context, pass a
-`resolveExtra` callback. Mastra's `execute(inputData, context)` second argument is whatever
-the customer's tools already receive — read from it:
+By default the adapter pulls `sessionId`, `requestId`, `requestInfo.headers`, and
+`authInfo` straight out of Mastra's standard MCP context — `context.mcp.extra` (with
+`context.requestContext.get("mcp.extra")` as a fallback). No `resolveExtra` glue
+required for tools invoked over MCP. Pass a `resolveExtra` only when you need to
+override or add fields (e.g. servers that store auth elsewhere); the values you return
+are merged on top of the default extraction:
 
 ```ts
 wrapMastraTools(tools, {
   armature: { delivery: "await" },
   resolveExtra: (mastraContext) => ({
     sessionId: (mastraContext as any)?.runtimeContext?.get?.("sessionId"),
-    authInfo: (mastraContext as any)?.requestContext?.authInfo,
   }),
 });
 ```
+
+The SDK also recognises `authInfo.apiKey` and `authInfo.principalId` as actor-seed
+aliases (alongside `authInfo.token` and `authInfo.clientId`), so Mastra setups that
+expose auth under those names don't need a custom `actorId` resolver.
 
 `actorId` is configured the normal way on `config.armature.actorId` — the resolver
 receives `ctx` set to Mastra's second-arg context.

@@ -63,6 +63,7 @@ Three things happen on every tool call:
 
 `createMcpAnalyticsServer` covers most repos. If yours doesn't fit, there are three other entry points — the [agent skill](SKILL.md) picks the right one automatically:
 
+- **Concrete-server registry helper** — `instrumentMcpServerTools({ server, tools, config, mapTool })`. Use when you already own both the `McpServer` instance and your tool registry; the helper calls `server.registerTool(...)` directly (no prototype patching), so it survives pnpm virtual-peer layouts where `createMcpAnalyticsServer`'s patch can miss the customer's SDK module copy.
 - **Registry-style** — `createAnalyticsRecorder()` + `analytics.tool(...)` + `analytics.createMcpServer(...)`. Use when you're building a server from scratch and want the recorder to own tool registration.
 - **Dispatcher-style** — same recorder, but you call `analytics.toolDefinitions()` from your `tools/list` handler and `analytics.dispatch(name, args, ctx)` from `tools/call`. For servers that hand-roll the JSON-RPC layer.
 - **Mastra** — `wrapMastraTools(tools, config)` from `@armature-tech/mcp-analytics/mastra`. Drop the wrapped map into `new MCPServer({ tools })`.

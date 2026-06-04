@@ -49,3 +49,10 @@ export {
 export { createAnalyticsRecorder } from "./recorder.js";
 
 export { createMcpAnalyticsServer, withMcpAnalytics } from "./server.js";
+
+export {
+  instrumentMcpServerTools,
+  type InstrumentMcpServerToolsOptions,
+  type InstrumentMcpServerToolsResult,
+  type InstrumentedTool,
+} from "./instrument-tools.js";

@@ -35,6 +35,8 @@ export const resolveActorSeed = async (
 
   if (input.authInfo?.token) return input.authInfo.token;
   if (input.authInfo?.clientId) return input.authInfo.clientId;
+  if (input.authInfo?.apiKey) return input.authInfo.apiKey;
+  if (input.authInfo?.principalId) return input.authInfo.principalId;
 
   const authorization = headerValue(input.headers, "authorization");
   if (authorization) return authorization;

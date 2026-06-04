@@ -33,6 +33,8 @@ export type RequestExtra = {
   authInfo?: {
     token?: string;
     clientId?: string;
+    apiKey?: string;
+    principalId?: string;
   };
   requestInfo?: {
     headers?: HeaderBag;
