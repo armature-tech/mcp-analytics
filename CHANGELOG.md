@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.3
+
+### Mastra adapter: decorate zod/v4 inputSchemas with a v4 telemetry block
+
+Hosts using zod/v4 (e.g. Autumn's `packages/mcp`) declare tool inputs as
+`zv4.object({ request: schema }).strict()`. The Mastra adapter detected these as v3
+`ZodObject`s (both have `.shape` and `.extend`) and extended them with a v3 telemetry
+block. `.extend()` accepted the cross-version shape silently, then every `.parse()` threw
+`Invalid element at key "telemetry": expected a Zod schema`, breaking every tool call at
+the Mastra/MCP input-validation boundary.
+
+The adapter now discriminates v4 from v3 via the `_zod` brand v4 schemas carry, and
+builds the telemetry block from the matching namespace.
+
+### README rewrite
+
+Restructured to lead with the value proposition and a single drop-in example, modeled on
+[useautumn/autumn](https://github.com/useautumn/autumn)'s README. The four parallel
+quick-starts collapsed into one primary shape (`createMcpAnalyticsServer`) plus a short
+pointer to [`SKILL.md`](SKILL.md) for the registry / dispatcher / Mastra alternatives.
+No API changes.
+
 ## 0.4.2
 
 ### Default telemetry schema no longer enforces value constraints
