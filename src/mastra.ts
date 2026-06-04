@@ -1,0 +1,113 @@
+import { createAnalyticsRecorder } from "./recorder.js";
+import { decorateInputSchemaWithTelemetry } from "./schema.js";
+import type {
+  AnalyticsRecorder,
+  McpAnalyticsConfig,
+  RequestExtra,
+} from "./types.js";
+
+export type MastraToolExecute = (
+  inputData: unknown,
+  context?: unknown,
+) => unknown | Promise<unknown>;
+
+export type MastraTool = {
+  id?: string;
+  description?: string;
+  inputSchema?: unknown;
+  outputSchema?: unknown;
+  execute?: MastraToolExecute;
+  [key: string]: unknown;
+};
+
+export type MastraToolMap = Record<string, MastraTool>;
+
+export type MastraAdapterOptions = McpAnalyticsConfig & {
+  resolveExtra?: (mastraContext: unknown) => RequestExtra | undefined;
+};
+
+const wrapOneTool = (
+  toolKey: string,
+  tool: MastraTool,
+  recorder: AnalyticsRecorder,
+  config: McpAnalyticsConfig,
+  resolveExtra?: (mastraContext: unknown) => RequestExtra | undefined,
+): MastraTool => {
+  if (typeof tool?.execute !== "function") {
+    return tool;
+  }
+
+  const originalExecute = tool.execute;
+  const toolName = tool.id ?? toolKey;
+  const decoratedInputSchema =
+    tool.inputSchema === undefined
+      ? undefined
+      : decorateInputSchemaWithTelemetry(tool.inputSchema, config);
+
+  const wrappedExecute: MastraToolExecute = (inputData, mastraContext) => {
+    const extra = resolveExtra?.(mastraContext);
+    return recorder.instrumentToolCall(
+      {
+        name: toolName,
+        args: inputData,
+        ctx: mastraContext,
+        extra,
+        sessionId: extra?.sessionId,
+        requestId:
+          extra?.requestId === undefined ? undefined : String(extra.requestId),
+        authInfo: extra?.authInfo,
+        headers: extra?.requestInfo?.headers,
+      },
+      (strippedArgs) => originalExecute(strippedArgs, mastraContext),
+    );
+  };
+
+  return {
+    ...tool,
+    ...(decoratedInputSchema !== undefined
+      ? { inputSchema: decoratedInputSchema }
+      : {}),
+    execute: wrappedExecute,
+  };
+};
+
+export const wrapMastraToolsWithRecorder = (
+  tools: MastraToolMap,
+  recorder: AnalyticsRecorder,
+  config: McpAnalyticsConfig = {},
+  options: { resolveExtra?: MastraAdapterOptions["resolveExtra"] } = {},
+): MastraToolMap => {
+  const out: MastraToolMap = {};
+  for (const [key, tool] of Object.entries(tools)) {
+    out[key] = wrapOneTool(key, tool, recorder, config, options.resolveExtra);
+  }
+  return out;
+};
+
+export const wrapMastraTools = (
+  tools: MastraToolMap,
+  options: MastraAdapterOptions = {},
+): MastraToolMap => {
+  const { resolveExtra, ...config } = options;
+  const recorder = createAnalyticsRecorder(config);
+  return wrapMastraToolsWithRecorder(tools, recorder, config, { resolveExtra });
+};
+
+export type MastraAnalytics = {
+  recorder: AnalyticsRecorder;
+  wrapTools: (tools: MastraToolMap) => MastraToolMap;
+  flush: () => Promise<void>;
+};
+
+export const createMastraAnalytics = (
+  options: MastraAdapterOptions = {},
+): MastraAnalytics => {
+  const { resolveExtra, ...config } = options;
+  const recorder = createAnalyticsRecorder(config);
+  return {
+    recorder,
+    wrapTools: (tools) =>
+      wrapMastraToolsWithRecorder(tools, recorder, config, { resolveExtra }),
+    flush: recorder.flush,
+  };
+};

@@ -19,6 +19,16 @@
         "types": "./dist/cjs/index.d.ts",
         "default": "./dist/cjs/index.js"
       }
+    },
+    "./mastra": {
+      "import": {
+        "types": "./dist/esm/mastra.d.ts",
+        "default": "./dist/esm/mastra.js"
+      },
+      "require": {
+        "types": "./dist/cjs/mastra.d.ts",
+        "default": "./dist/cjs/mastra.js"
+      }
     }
   },
   "files": [

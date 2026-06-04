@@ -5,9 +5,9 @@ description: >
   emit telemetry to Armature. Use whenever the user wants to add, install, integrate,
   or instrument analytics on an MCP server — e.g. "add Armature analytics to this MCP",
   "instrument my tools", "wire mcp-analytics into our server". Detects which integration
-  shape fits the repo (registry-style McpServer, drop-in factory, or dispatcher), makes
-  the edits, and verifies the wiring by checking the schema includes the telemetry block
-  and a test tool call produces a signed batch.
+  shape fits the repo (registry-style McpServer, drop-in factory, dispatcher, or Mastra
+  MCPServer), makes the edits, and verifies the wiring by checking the schema includes
+  the telemetry block and a test tool call produces a signed batch.
 ---
 
 # Install @armature-tech/mcp-analytics into an MCP server
@@ -18,7 +18,7 @@ agent can pass `intent`, `context`, `frustration_level`), strips those fields be
 handler runs, and posts a signed batch to Armature after each call.
 
 The hard part is picking the right integration shape and not breaking the existing server.
-Three shapes exist; pick one based on how the customer's code looks today.
+Four shapes exist; pick one based on how the customer's code looks today.
 
 ## Step 1: Identify the integration shape
 
@@ -26,13 +26,16 @@ Read enough of the repo to classify it. Grep first; only open files you need.
 
 | Signal | Shape |
 | --- | --- |
+| `package.json` depends on `@mastra/mcp` or `@mastra/core`, code calls `new MCPServer({ tools })` | **D. Mastra** |
 | Code calls `new McpServer(...)` and then `server.registerTool(...)` directly | **A. Drop-in** |
 | Code is new / customer wants to define tools through us | **B. Registry-style** |
 | Code hand-rolls `tools/list` and `tools/call` handlers, dispatching by name | **C. Dispatcher** |
 
-A factory that constructs `McpServer` and registers tools inside is the most common — that's
-shape A. Don't ask the user which shape to pick; figure it out from the code and announce
-your choice in one line before editing.
+Mastra (Shape D) check first — it's the only one keyed off a dependency, and `@mastra/mcp`'s
+`MCPServer` looks superficially like the SDK's `McpServer` but is a different surface, so
+Shapes A–C will not fit. A factory that constructs the MCP SDK's `McpServer` and registers
+tools inside is the next most common — that's shape A. Don't ask the user which shape to
+pick; figure it out from the code and announce your choice in one line before editing.
 
 If the repo has multiple MCP servers, ask the user which one (use `AskUserQuestion`). Don't
 guess.
@@ -210,6 +213,60 @@ The `sessionId` should come from whatever you already track per-connection (the 
 session id from the `Mcp-Session-Id` header, your own session table, etc.). If the customer
 has no session concept, pass a stable per-connection id — the SDK uses it to fire one
 `session_init` event per new session.
+
+### Shape D — Mastra
+
+For servers built on `@mastra/mcp`'s `MCPServer` with tools defined via
+`createTool({...})` from `@mastra/core/tools`. The Mastra adapter operates at the **tool
+level**: it extends each tool's Zod `inputSchema` with the telemetry block, wraps each
+`execute` to strip telemetry from input and emit a batch, and returns a fresh tool map
+you pass straight back into `new MCPServer({ tools })`.
+
+```ts
+import { wrapMastraTools } from "@armature-tech/mcp-analytics/mastra";
+
+new MCPServer({
+  id: "my-mcp",
+  name: "My MCP",
+  version: "0.0.1",
+  tools: wrapMastraTools(createMyTools(), {
+    armature: { delivery: "await" },
+  }),
+  resources: myResources,
+});
+```
+
+If the server needs `flush()` (long-lived process on `delivery: "background"`) or
+shares a recorder across multiple tool maps, use `createMastraAnalytics`:
+
+```ts
+import { createMastraAnalytics } from "@armature-tech/mcp-analytics/mastra";
+
+const analytics = createMastraAnalytics({ armature: { delivery: "background" } });
+new MCPServer({ tools: analytics.wrapTools(createMyTools()), ... });
+process.on("SIGTERM", () => analytics.flush());
+```
+
+To propagate `sessionId` / `authInfo` from Mastra's per-call context, pass a
+`resolveExtra` callback. Mastra's `execute(inputData, context)` second argument is whatever
+the customer's tools already receive — read from it:
+
+```ts
+wrapMastraTools(tools, {
+  armature: { delivery: "await" },
+  resolveExtra: (mastraContext) => ({
+    sessionId: (mastraContext as any)?.runtimeContext?.get?.("sessionId"),
+    authInfo: (mastraContext as any)?.requestContext?.authInfo,
+  }),
+});
+```
+
+`actorId` is configured the normal way on `config.armature.actorId` — the resolver
+receives `ctx` set to Mastra's second-arg context.
+
+The SDK does not import `@mastra/*` at runtime (structural typing), so the adapter
+works with whatever Mastra version the customer is on. Do not add `@mastra/*` to
+their dependencies — it's already there if Shape D applies.
 
 ### Recording session_init at handshake (optional, all shapes)
 

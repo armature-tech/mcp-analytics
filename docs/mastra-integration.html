@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>@armature-tech/mcp-analytics — Mastra integration</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --fg: #0f172a;
+      --muted: #475569;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --accent: #2563eb;
+      --code-bg: #0f172a;
+      --code-fg: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+      line-height: 1.55;
+      color: var(--fg);
+      background: var(--bg);
+      margin: 0;
+      padding: 32px 16px;
+    }
+    main { max-width: 980px; margin: 0 auto; }
+    h1 {
+      font-size: 28px;
+      margin: 0 0 8px;
+      letter-spacing: -0.01em;
+    }
+    h2 {
+      font-size: 20px;
+      margin: 40px 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    h3 { font-size: 16px; margin: 24px 0 8px; }
+    p { color: var(--muted); margin: 8px 0; }
+    p strong { color: var(--fg); }
+    .lede { font-size: 16px; color: var(--muted); margin: 0 0 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 16px 0;
+    }
+    .mermaid {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin: 16px 0;
+      overflow-x: auto;
+    }
+    pre, code {
+      font-family: "SF Mono", "Menlo", Consolas, monospace;
+      font-size: 13px;
+    }
+    pre {
+      background: var(--code-bg);
+      color: var(--code-fg);
+      padding: 16px 20px;
+      border-radius: 10px;
+      overflow-x: auto;
+      margin: 12px 0;
+    }
+    code:not(pre code) {
+      background: #e2e8f0;
+      color: var(--fg);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 12.5px;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 720px) { .row { grid-template-columns: 1fr; } }
+    .pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: #dbeafe;
+      color: #1d4ed8;
+      vertical-align: middle;
+    }
+    .pill.warn { background: #fef3c7; color: #92400e; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Integrating <code>@armature-tech/mcp-analytics</code> with Mastra <span class="pill">Shape D</span></h1>
+  <p class="lede">
+    Mastra's <code>@mastra/mcp</code> uses its own <code>MCPServer</code> class — different surface from
+    <code>@modelcontextprotocol/sdk</code>'s <code>McpServer</code>. The analytics adapter operates at the
+    <strong>tool level</strong> instead of the server level: it wraps each tool's <code>inputSchema</code> and
+    <code>execute</code> before you hand them to <code>new MCPServer({ tools })</code>.
+  </p>
+
+  <h2>1. What the integration looks like</h2>
+  <p>One import, one wrap call. The Mastra server stays untouched — same construction call, same OAuth, same transport.</p>
+  <pre><code>import { MCPServer } from "@mastra/mcp";
+import { wrapMastraTools } from "@armature-tech/mcp-analytics/mastra";
+
+new MCPServer({
+  id: "my-mcp",
+  name: "My MCP",
+  version: "0.0.1",
+  tools: wrapMastraTools(createMyTools(), {
+    armature: { delivery: "await" },
+  }),
+});</code></pre>
+
+  <h2>2. What <code>wrapMastraTools</code> transforms</h2>
+  <p>It walks the <code>{ name: tool }</code> map you pass to <code>MCPServer</code>, decorates each
+    <code>inputSchema</code> with a <code>telemetry</code> block (so the LLM sees fields for
+    <code>intent</code> / <code>context</code> / <code>frustration_level</code>), and swaps each
+    <code>execute</code> for an instrumented version. Identity of the map shape is preserved — Mastra still
+    sees the tools it expects.</p>
+  <div class="mermaid">
+flowchart LR
+  subgraph IN["Original Mastra tools"]
+    direction TB
+    T1["lookup_customer<br/>inputSchema: z.object({id})<br/>execute: handler"]
+    T2["create_plan<br/>inputSchema: z.object({...})<br/>execute: handler"]
+  end
+
+  subgraph WRAP["wrapMastraTools()"]
+    direction TB
+    S["decorateInputSchemaWithTelemetry"]
+    E["wrap execute() with recorder"]
+  end
+
+  subgraph OUT["Wrapped tools<br/>(same map, same keys)"]
+    direction TB
+    W1["lookup_customer<br/>inputSchema: z.object({id, telemetry})<br/>execute: instrumented"]
+    W2["create_plan<br/>inputSchema: z.object({..., telemetry})<br/>execute: instrumented"]
+  end
+
+  T1 --&gt; S
+  T2 --&gt; S
+  S --&gt; W1
+  S --&gt; W2
+  T1 -. original .-&gt; E
+  T2 -. original .-&gt; E
+  E --&gt; W1
+  E --&gt; W2
+
+  M["new MCPServer({ tools: ... })"]
+  W1 --&gt; M
+  W2 --&gt; M
+
+  classDef src fill:#fef3c7,stroke:#f59e0b,color:#78350f;
+  classDef adapter fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef out fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class T1,T2 src;
+  class S,E adapter;
+  class W1,W2,M out;
+  </div>
+
+  <h2>3. Runtime: one tool call end-to-end</h2>
+  <p>When an MCP client calls a wrapped tool, the adapter's <code>execute</code> intercepts the call,
+    extracts the <code>telemetry</code> block from the args, runs the original handler with the cleaned
+    input, and posts a signed batch to Armature after the handler returns (or throws).</p>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Client as MCP client<br/>(Claude, etc.)
+  participant MCPServer as @mastra/mcp<br/>MCPServer
+  participant Wrapped as wrapped<br/>execute()
+  participant Recorder as recorder.instrumentToolCall
+  participant Orig as original<br/>execute()
+  participant Armature as Armature<br/>ingest
+
+  Client-&gt;&gt;MCPServer: tools/call { name, args + telemetry }
+  MCPServer-&gt;&gt;Wrapped: execute(inputData, ctx)
+  Wrapped-&gt;&gt;Recorder: { name, args, ctx, extra }
+  Note over Recorder: extractTelemetryArguments<br/>splits { telemetry, ...args }
+  Recorder-&gt;&gt;Orig: execute(strippedArgs, ctx)
+  Orig--&gt;&gt;Recorder: result | throws
+  Note over Recorder: buildToolCallEvent +<br/>buildBatch (incl. session_init<br/>on first sessionId)
+  Recorder-&gt;&gt;Armature: POST signed batch<br/>(delivery: await | background)
+  Armature--&gt;&gt;Recorder: 200 OK
+  Recorder--&gt;&gt;Wrapped: result
+  Wrapped--&gt;&gt;MCPServer: result
+  MCPServer--&gt;&gt;Client: tools/call result
+  </div>
+
+  <h2>4. Where the boundary is</h2>
+  <p>Everything in the dashed Mastra box is unchanged. The adapter sits entirely inside the tool
+    object, so Mastra's protocol handling, OAuth, resources, and HTTP transport keep working as-is.
+    The package never imports <code>@mastra/*</code> at runtime — typing is structural — so any
+    Mastra version with the standard <code>{ id, inputSchema, execute }</code> shape works.</p>
+  <div class="mermaid">
+flowchart TB
+  subgraph Mastra ["@mastra/mcp + @mastra/core (unchanged)"]
+    direction TB
+    HTTP["startHTTP() / Hono route"]
+    Proto["protocol layer<br/>(tools/list, tools/call)"]
+    Tools["tools: { ... }"]
+    HTTP --&gt; Proto --&gt; Tools
+  end
+
+  subgraph Adapter ["@armature-tech/mcp-analytics/mastra"]
+    direction TB
+    Wrap["wrapMastraTools(tools, config)"]
+    Rec["AnalyticsRecorder<br/>(shared infra: schema, events, emit)"]
+    Wrap --&gt; Rec
+  end
+
+  UserCode["createMyTools()<br/>→ { name: createTool({...}) }"]
+  Server["new MCPServer({<br/>  tools: wrapMastraTools(...)<br/>})"]
+  Ingest["app.armature.tech /api/mcp-analytics/ingest"]
+
+  UserCode --&gt; Wrap
+  Wrap --&gt; Server
+  Server --&gt; Mastra
+  Rec -. HMAC-signed POST .-&gt; Ingest
+
+  classDef external fill:#f1f5f9,stroke:#94a3b8,color:#334155,stroke-dasharray: 5 5;
+  classDef ours fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef user fill:#fef3c7,stroke:#f59e0b,color:#78350f;
+  classDef sink fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class HTTP,Proto,Tools external;
+  class Wrap,Rec ours;
+  class UserCode,Server user;
+  class Ingest sink;
+  </div>
+
+  <h2>5. Carrying session + auth from Mastra's runtime context</h2>
+  <p>Mastra calls <code>execute(inputData, context)</code> — the second arg is whatever the customer's
+    tools already receive (Mastra-specific shape with <code>runtimeContext</code>, request metadata, etc.).
+    Pass a <code>resolveExtra</code> callback to lift <code>sessionId</code> / <code>authInfo</code> /
+    headers off of it into our analytics event.</p>
+  <pre><code>wrapMastraTools(tools, {
+  armature: { delivery: "await" },
+  resolveExtra: (mastraContext) =&gt; ({
+    sessionId: mastraContext?.runtimeContext?.get?.("sessionId"),
+    authInfo: mastraContext?.requestContext?.authInfo,
+  }),
+});</code></pre>
+  <p><code>actorId</code> uses the normal config path — the resolver's <code>ctx</code> argument
+    is set to Mastra's second-arg context, so you can pull from <code>runtimeContext</code> there too.</p>
+
+  <h2>6. Long-lived processes &amp; flushing <span class="pill warn">delivery: background</span></h2>
+  <p>If the server is a persistent Node process and you want <code>delivery: "background"</code>
+    (default — returns the tool result before the batch is posted), use <code>createMastraAnalytics</code>
+    to keep a handle on <code>flush()</code>:</p>
+  <pre><code>import { createMastraAnalytics } from "@armature-tech/mcp-analytics/mastra";
+
+const analytics = createMastraAnalytics({
+  armature: { delivery: "background" },
+});
+
+new MCPServer({
+  tools: analytics.wrapTools(createMyTools()),
+  /* ... */
+});
+
+process.on("SIGTERM", () =&gt; analytics.flush());</code></pre>
+  <p>For serverless deployments (per-request lambdas, Vercel, Workers, Mastra hosted on Hono
+    with <code>{ serverless: true }</code> — Autumn's setup), stay on <code>delivery: "await"</code>
+    and you don't need a flush handle.</p>
+
+  <h2>7. The full set of exports</h2>
+  <div class="row">
+    <div class="card">
+      <h3><code>wrapMastraTools(tools, opts?)</code></h3>
+      <p>Convenience: creates an internal recorder, returns the wrapped tool map. Use when you don't need a flush handle.</p>
+    </div>
+    <div class="card">
+      <h3><code>createMastraAnalytics(opts?)</code></h3>
+      <p>Returns <code>{ recorder, wrapTools, flush }</code>. Use for shared recorders or background delivery.</p>
+    </div>
+    <div class="card">
+      <h3><code>wrapMastraToolsWithRecorder(tools, recorder, config?, opts?)</code></h3>
+      <p>Lowest level: bring your own <code>AnalyticsRecorder</code>. Useful if you already construct one for non-Mastra reasons.</p>
+    </div>
+    <div class="card">
+      <h3><code>MastraAdapterOptions</code></h3>
+      <p>All of <code>McpAnalyticsConfig</code> plus an optional <code>resolveExtra(mastraContext)</code>.</p>
+    </div>
+  </div>
+
+  <p class="meta">
+    Adapter source: <code>src/mastra.ts</code> · Subpath export: <code>@armature-tech/mcp-analytics/mastra</code>
+    · Tests: <code>tests/mastra-adapter.test.ts</code>
+  </p>
+</main>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "default",
+    securityLevel: "loose",
+    flowchart: { curve: "basis", htmlLabels: true },
+    sequence: { showSequenceNumbers: false, messageAlign: "left" },
+  });
+</script>
+</body>
+</html>

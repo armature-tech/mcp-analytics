@@ -4,7 +4,7 @@ Wrapper SDK that instruments MCP servers with analytics telemetry. It decorates 
 
 The SDK is a drop-in for any server built on `@modelcontextprotocol/sdk`'s `McpServer`. It does not introduce a middleware server and does not modify the arguments the original handler sees.
 
-It also exposes recorder primitives for dispatcher-style MCP servers that hand-roll `tools/list` and `tools/call` without using `McpServer.registerTool`.
+It also exposes recorder primitives for dispatcher-style MCP servers that hand-roll `tools/list` and `tools/call` without using `McpServer.registerTool`, and a `./mastra` subpath export for servers built on `@mastra/mcp`'s `MCPServer`.
 
 > **AI agents integrating this SDK:** read [`SKILL.md`](SKILL.md) for the step-by-step playbook (shape detection, env vars, delivery mode, verification). It also ships in the npm tarball at `node_modules/@armature-tech/mcp-analytics/SKILL.md`.
 
@@ -109,6 +109,63 @@ return await analytics.dispatch(name, rawArgs, { ctx, sessionId });
 ```
 
 The handler sees stripped args — no `telemetry` field — and a `context` object with whatever you passed to `dispatch`. The recorder times the call, records a `tool_call` event (success or error), and rethrows on failure.
+
+## Mastra servers (`@mastra/mcp`)
+
+Servers built on `@mastra/mcp`'s `MCPServer` and Mastra's `createTool()` from
+`@mastra/core/tools` use a different surface than the MCP SDK's `McpServer`. The
+`./mastra` subpath export wraps each tool's `inputSchema` with the telemetry block and
+each `execute` with the recorder — drop the wrapped map straight into `new MCPServer({ tools })`:
+
+```ts
+import { MCPServer } from "@mastra/mcp";
+import { wrapMastraTools } from "@armature-tech/mcp-analytics/mastra";
+
+new MCPServer({
+  id: "my-mcp",
+  name: "My MCP",
+  version: "0.0.1",
+  tools: wrapMastraTools(createMyTools(), {
+    armature: {
+      endpointUrl: "https://app.armature.tech/api/mcp-analytics/ingest",
+      mcpServerId: process.env.ANALYTICS_MCP_SERVER_ID,
+      ingestSecret: process.env.ANALYTICS_INGEST_SECRET,
+      delivery: "await",
+    },
+  }),
+});
+```
+
+For long-lived processes that want a `flush()` handle (`delivery: "background"`), or to
+share one recorder across multiple tool maps, use `createMastraAnalytics`:
+
+```ts
+import { createMastraAnalytics } from "@armature-tech/mcp-analytics/mastra";
+
+const analytics = createMastraAnalytics({
+  armature: { delivery: "background" },
+});
+
+const tools = analytics.wrapTools(createMyTools());
+process.on("SIGTERM", () => analytics.flush());
+```
+
+To propagate `sessionId` / `authInfo` from Mastra's per-call context (the second arg to
+`execute`), pass `resolveExtra`:
+
+```ts
+wrapMastraTools(tools, {
+  armature: { delivery: "await" },
+  resolveExtra: (mastraContext) => ({
+    sessionId: mastraContext?.runtimeContext?.get?.("sessionId"),
+    authInfo: mastraContext?.requestContext?.authInfo,
+  }),
+});
+```
+
+The package does not import `@mastra/*` at runtime (structural typing), so the adapter
+works with any Mastra version that exposes the standard `{ id, inputSchema, execute }`
+tool shape.
 
 ### Lower-level entry points
 
