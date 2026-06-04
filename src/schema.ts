@@ -1,4 +1,5 @@
 import { z } from "zod";
+import * as zv4 from "zod/v4";
 import type {
   ExtractedToolArguments,
   JsonObjectSchema,
@@ -29,11 +30,47 @@ const looseTelemetryInputSchema = z.object({
   frustration_level: z.string().describe(FRUSTRATION_LEVEL_DESCRIPTION).optional(),
 });
 
+const strictTelemetryInputSchemaV4 = zv4.object({
+  intent: zv4.string().min(1).describe(INTENT_DESCRIPTION),
+  context: zv4.string().min(1).describe(CONTEXT_DESCRIPTION).optional(),
+  frustration_level: zv4
+    .enum(["low", "medium", "high"])
+    .describe(FRUSTRATION_LEVEL_DESCRIPTION)
+    .optional(),
+});
+
+const looseTelemetryInputSchemaV4 = zv4.object({
+  intent: zv4.string().describe(INTENT_DESCRIPTION).optional(),
+  context: zv4.string().describe(CONTEXT_DESCRIPTION).optional(),
+  frustration_level: zv4
+    .string()
+    .describe(FRUSTRATION_LEVEL_DESCRIPTION)
+    .optional(),
+});
+
+// v4 Zod schemas carry a `_zod` brand on every type; v3 only has `_def`.
+// We discriminate on that brand so a v4 ZodObject doesn't get extended with a
+// v3 telemetry schema (which silently registers but throws "expected a Zod
+// schema" at every parse).
+const isZodV4ObjectSchema = (
+  value: unknown,
+): value is zv4.ZodObject<zv4.ZodRawShape> & {
+  extend(shape: zv4.ZodRawShape): zv4.ZodObject<zv4.ZodRawShape>;
+} => {
+  return (
+    isRecord(value) &&
+    "_zod" in value &&
+    "shape" in value &&
+    typeof value.extend === "function"
+  );
+};
+
 const isZodV3ObjectSchema = (
   value: unknown,
 ): value is z.AnyZodObject & { extend(shape: z.ZodRawShape): z.AnyZodObject } => {
   return (
     isRecord(value) &&
+    !("_zod" in value) &&
     "shape" in value &&
     typeof value.extend === "function"
   );
@@ -45,6 +82,12 @@ export const createTelemetryInputSchema = (
   return config.telemetry?.intent === "required"
     ? strictTelemetryInputSchema
     : looseTelemetryInputSchema;
+};
+
+const createTelemetryInputSchemaV4 = (config: McpAnalyticsConfig) => {
+  return config.telemetry?.intent === "required"
+    ? strictTelemetryInputSchemaV4
+    : looseTelemetryInputSchemaV4;
 };
 
 export const createTelemetryJsonSchema = (
@@ -101,14 +144,16 @@ export const decorateInputSchemaWithTelemetry = (
   inputSchema: unknown,
   config: McpAnalyticsConfig = {},
 ) => {
-  const telemetry = createTelemetryInputSchema(config);
-
   if (inputSchema === undefined) {
-    return { telemetry };
+    return { telemetry: createTelemetryInputSchema(config) };
+  }
+
+  if (isZodV4ObjectSchema(inputSchema)) {
+    return inputSchema.extend({ telemetry: createTelemetryInputSchemaV4(config) });
   }
 
   if (isZodV3ObjectSchema(inputSchema)) {
-    return inputSchema.extend({ telemetry });
+    return inputSchema.extend({ telemetry: createTelemetryInputSchema(config) });
   }
 
   if (isJsonObjectSchema(inputSchema)) {
@@ -118,7 +163,7 @@ export const decorateInputSchemaWithTelemetry = (
   if (isRawShape(inputSchema)) {
     return {
       ...inputSchema,
-      telemetry,
+      telemetry: createTelemetryInputSchema(config),
     };
   }
 
