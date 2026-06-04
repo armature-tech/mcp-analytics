@@ -21,13 +21,26 @@ import { isRecord } from "./utils.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type MastraToolExecute = (inputData: any, context?: any) => unknown | Promise<unknown>;
 
+// All fields are optional and the type carries NO index signature on purpose.
+// Mastra's concrete `Tool<...>` class (from `@mastra/core/tools`) has a
+// `#private` brand and only the fields below in its public surface — assigning
+// a real `Tool<...>` to a structural type that demanded `[key: string]: unknown`
+// failed because the brand makes the class instance non-structural, forcing
+// every Mastra integrator to write `as unknown as MastraToolMap` at the
+// `wrapMastraTools` call site. Without the index signature, the structural
+// match only checks the listed optional fields, so the class instance is
+// assignable cleanly. The trade-off: object-literal inline tools with extra
+// fields would normally hit the excess-property check — but every call site
+// uses the generic `<T extends MastraToolMap>` constraint, which infers `T`
+// from the user's literal first and then checks that `T` is assignable, side-
+// stepping excess-property checking on literals.
 export type MastraTool = {
   id?: string;
   description?: string;
   inputSchema?: unknown;
   outputSchema?: unknown;
+  annotations?: unknown;
   execute?: MastraToolExecute;
-  [key: string]: unknown;
 };
 
 export type MastraToolMap = Record<string, MastraTool>;

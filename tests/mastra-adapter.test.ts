@@ -391,6 +391,103 @@ test("Mastra-shaped tool with narrower context assigns into wrapMastraTools with
   void _checkAssignable;
 });
 
+// Mirrors the shape `@mastra/core/tools` actually returns from `createTool(...)`:
+// a class instance with a #private brand. Before MastraTool dropped its
+// `[key: string]: unknown` index signature, this class instance was NOT
+// assignable to `MastraToolMap` because the private brand makes the class
+// non-structural — index signatures require all properties of the source
+// type to satisfy the signature's value type, which a `#brand` field can't.
+// Autumn was forced to write `wrapMastraTools(createRawAutumnOperationTools()
+// as unknown as MastraToolMap, ...) as unknown as AutumnOperationTools`.
+class MastraToolClassFixture<TInput, TOutput> {
+  // `#brand` is the load-bearing detail — it's what makes the class instance
+  // non-structural in TypeScript's eyes, the same way `@mastra/core/tools`
+  // brands its real `Tool` class.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  #brand: true = true;
+  constructor(
+    public id: string,
+    public description: string | undefined,
+    public inputSchema: z.ZodType<TInput>,
+    public execute: (
+      input: TInput,
+      context: { mcp?: { extra?: unknown } },
+    ) => Promise<TOutput>,
+  ) {}
+}
+
+const createMastraToolClassFixture = <TInput, TOutput>(def: {
+  id: string;
+  description?: string;
+  inputSchema: z.ZodType<TInput>;
+  execute: (
+    input: TInput,
+    context: { mcp?: { extra?: unknown } },
+  ) => Promise<TOutput>;
+}) => new MastraToolClassFixture(def.id, def.description, def.inputSchema, def.execute);
+
+test("Mastra-Tool-class-shaped registry (with #private brand) assigns into wrapMastraTools without `as unknown as MastraToolMap`", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = makeRecorder(batches);
+
+  // Exact Autumn call-site shape: a factory that returns a `Record<string, Tool>`
+  // where `Tool` is a class instance with a #private brand. Pre-fix this required
+  //   wrapMastraTools(createRawAutumnOperationTools() as unknown as MastraToolMap, ...)
+  //     as unknown as AutumnOperationTools
+  // because the `[key: string]: unknown` index signature on the old MastraTool
+  // rejected the class instance.
+  const createRawAutumnOperationTools = () => ({
+    lookup_customer: createMastraToolClassFixture({
+      id: "lookup_customer",
+      description: "Look up a customer.",
+      inputSchema: z.object({ customer_id: z.string() }),
+      execute: async (input) => ({ id: input.customer_id, name: "Ada" }),
+    }),
+    create_invoice: createMastraToolClassFixture({
+      id: "create_invoice",
+      description: "Create an invoice.",
+      inputSchema: z.object({ amount: z.number() }),
+      execute: async (input) => ({ invoice_id: `inv_${input.amount}` }),
+    }),
+  });
+
+  type AutumnOperationTools = ReturnType<typeof createRawAutumnOperationTools>;
+
+  // The ONE assertion: this call has to typecheck with no cast on the input or
+  // the return value. The `: AutumnOperationTools` annotation locks in the
+  // return-type preservation; if `wrapMastraTools` regresses to returning
+  // `MastraToolMap`, the annotation breaks `tsc --noEmit -p tsconfig.test.json`.
+  const wrapped: AutumnOperationTools = wrapMastraToolsWithRecorder(
+    createRawAutumnOperationTools(),
+    recorder,
+  );
+
+  assert.ok(wrapped.lookup_customer);
+  assert.ok(wrapped.create_invoice);
+
+  // And the runtime path still works — wrapped class-instance tool strips
+  // telemetry and emits a tool-call batch.
+  const result = await wrapped.lookup_customer.execute(
+    {
+      customer_id: "cus_99",
+      // The wrapped execute strips this before calling the original handler.
+      // We pass it as a loose cast because the class fixture's input type
+      // doesn't include the SDK-injected telemetry block — that's exactly the
+      // shape Mastra emits when the agent populates it.
+      ...({ telemetry: { intent: "class-fixture lookup" } } as object),
+    } as { customer_id: string },
+    { mcp: { extra: { sessionId: "sess-class-1" } } },
+  );
+  assert.deepEqual(result, { id: "cus_99", name: "Ada" });
+
+  const events = batches.flatMap((batch) => batch.events);
+  const toolCall = events.find((event) => event.kind === "tool_call");
+  assert.ok(toolCall);
+  assert.equal(toolCall?.metadata.tool_name, "lookup_customer");
+  assert.equal(toolCall?.metadata.intent, "class-fixture lookup");
+  assert.equal(toolCall?.session_id_hint, "sess-class-1");
+});
+
 test("wrapMastraTools decorates a zod/v4 strict object inputSchema without mixing namespaces", async () => {
   // Mirrors Autumn's tool shape: `z.object({ request: schema }).strict()` from zod/v4.
   // The SDK historically detected this as a v3 object and extended it with a v3 telemetry

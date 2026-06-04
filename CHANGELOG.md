@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.1
+
+### Mastra adapter: drop the index signature from `MastraTool` so real `Tool<...>` class instances assign without a cast
+
+`@mastra/core/tools` returns a `Tool<...>` *class instance* with a `#private` brand. The previous `MastraTool` definition included `[key: string]: unknown`, and TypeScript refuses to assign a class with a `#private` field to a structural type carrying an index signature — the brand isn't representable. Every Mastra integrator hit this and had to write:
+
+```ts
+tools: wrapMastraTools(
+  createRawAutumnOperationTools() as unknown as MastraToolMap,
+  { armature: { delivery: "await" } },
+) as unknown as AutumnOperationTools,
+```
+
+The integrator-side cast is now gone. `MastraTool` is a closed object type (no index signature) listing only the optional fields the adapter actually reads (`id`, `description`, `inputSchema`, `outputSchema`, `annotations`, `execute`). Mastra's `Tool<...>` class instance satisfies the constraint structurally, and the existing `<T extends MastraToolMap>(tools: T) => T` generic preserves the caller's narrow type end-to-end so the result drops straight into `new MCPServer({ tools })`. Autumn-style call sites compile as:
+
+```ts
+tools: wrapMastraTools(createRawAutumnOperationTools(), {
+  armature: { delivery: "await" },
+})
+```
+
+Added a `#brand`-bearing class fixture to the test suite — if a future refactor reintroduces the index signature or otherwise breaks class-instance assignment, `tsc --noEmit -p tsconfig.test.json` fails.
+
+Runtime behavior is unchanged: schema decoration, telemetry stripping, default `context.mcp.extra` extraction, and `resolveExtra` layering all work exactly as in 0.6.0.
+
 ## 0.6.0
 
 Drops the integration boilerplate every Mastra adopter (e.g. Autumn) had been writing around `wrapMastraTools`, adds a `instrumentMcpServerTools` helper for servers that can't use `createMcpAnalyticsServer`'s prototype-patching path, and broadens the default actor-seed resolution to cover two more common auth field names.
