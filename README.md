@@ -6,6 +6,8 @@ The SDK is a drop-in for any server built on `@modelcontextprotocol/sdk`'s `McpS
 
 It also exposes recorder primitives for dispatcher-style MCP servers that hand-roll `tools/list` and `tools/call` without using `McpServer.registerTool`.
 
+> **AI agents integrating this SDK:** read [`SKILL.md`](SKILL.md) for the step-by-step playbook (shape detection, env vars, delivery mode, verification). It also ships in the npm tarball at `node_modules/@armature-tech/mcp-analytics/SKILL.md`.
+
 ## Install
 
 ```sh
@@ -221,4 +223,4 @@ For custom integrations the package also exports building blocks used internally
 
 - `src/` — the wrapper SDK.
 - `docs/` — architecture notes for the SDK.
-- `experimental/` — local mock servers, demo clients, and a Vercel demo deployment used to exercise the SDK. See `experimental/mock-env/` and `experimental/vercel-demo/` for details. Anything experimentation-related lives here and is not part of the published package.
+- `experimental/` — local mock servers and demo clients used to exercise the SDK. See `experimental/mock-env/` for details. Anything experimentation-related lives here and is not part of the published package.

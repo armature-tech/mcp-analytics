@@ -23,7 +23,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "SKILL.md"
   ],
   "scripts": {
     "dev:armature": "tsx experimental/mock-env/mock-armature-server.ts",
