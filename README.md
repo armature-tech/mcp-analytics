@@ -10,13 +10,37 @@ It also exposes recorder primitives for dispatcher-style MCP servers that hand-r
 
 ## Install
 
+### Step 1 — Install the agent skill (only if a coding agent will do the integration)
+
+If you'll have Claude Code, Cursor, Codex, Gemini, or another coding agent wire this in,
+install the skill **before** the npm package. The skill is the integration playbook the
+agent reads to detect your server's shape, make the edits, and verify the wiring — **it
+is not optional for agent-led installs.** Reading `node_modules/@armature-tech/mcp-analytics/SKILL.md`
+after the fact is not equivalent; the skill has to be in the agent's skill directory
+before it picks the integration shape.
+
 ```sh
-npx skills add armature-tech/mcp-analytics --global && npm install @armature-tech/mcp-analytics @modelcontextprotocol/sdk zod
+npx skills add armature-tech/mcp-analytics --global
 ```
 
-Then ask your coding agent (Claude Code, Cursor, Codex, Gemini, …): *"install Armature analytics on this MCP server"*. The `install-mcp-analytics` skill ([`SKILL.md`](SKILL.md)) detects which of the four integration shapes fits your repo (registry-style `McpServer`, drop-in factory, dispatcher, or Mastra `MCPServer`), makes the edits, and verifies the wiring.
+(The `skills` CLI is the open [`vercel-labs/skills`](https://github.com/vercel-labs/skills)
+installer — it copies `SKILL.md` into your agent's skill directory. Skip this step if
+you're integrating by hand.)
 
-Not using an agent? Just run the `npm install` part and follow the [Quick start](#quick-start) below. The `skills` CLI in the first half of the command is the open [`vercel-labs/skills`](https://github.com/vercel-labs/skills) installer — it copies `SKILL.md` into your agent's skill directory.
+### Step 2 — Install the SDK in the MCP server repo
+
+```sh
+npm install @armature-tech/mcp-analytics @modelcontextprotocol/sdk zod
+```
+
+### Step 3 — Run the integration
+
+Agent-led: ask your agent *"install Armature analytics on this MCP server"*. The
+`install-mcp-analytics` skill ([`SKILL.md`](SKILL.md)) detects which of the four
+integration shapes fits your repo (registry-style `McpServer`, drop-in factory,
+dispatcher, or Mastra `MCPServer`), makes the edits, and verifies the wiring.
+
+By hand: follow the [Quick start](#quick-start) below.
 
 ## Quick start
 
