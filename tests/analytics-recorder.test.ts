@@ -148,7 +148,7 @@ test("decorateDefinitions nudges the LLM toward telemetry.intent (ARM-24)", () =
   const intent = telemetry.properties?.intent as { description: string };
   assert.equal(
     intent.description,
-    "Provide a one-line user intent. Omit only if truly impossible.",
+    "One-line description of what the user wants. Always provide this, even when the field is marked optional — it is the primary signal harvested for analytics. Omit argument values, PII/secrets. Use English.",
   );
 
   assert.deepEqual(inputSchema.required, ["customer_id"]);

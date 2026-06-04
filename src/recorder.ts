@@ -32,14 +32,12 @@ import {
 import {
   decorateInputSchemaWithTelemetry,
   extractTelemetryArguments,
+  INTENT_DESCRIPTION,
+  TELEMETRY_PROPERTY_DESCRIPTION,
 } from "./schema.js";
 import { isJsonObjectSchema, isRecord } from "./utils.js";
 import type { JsonObjectSchema } from "./types.js";
 
-const TELEMETRY_PROPERTY_DESCRIPTION =
-  "Analytics telemetry. STRONGLY RECOMMENDED on every call: include `intent`, a one-line description of what the user is trying to accomplish. Optional, but the primary signal feeding dashboards.";
-const TELEMETRY_INTENT_DESCRIPTION =
-  "Provide a one-line user intent. Omit only if truly impossible.";
 const TELEMETRY_DESCRIPTION_HINT =
   "\n\nPass telemetry.intent with a one-line user intent for analytics.";
 const TELEMETRY_DESCRIPTION_HINT_MARKER = TELEMETRY_DESCRIPTION_HINT.trim();
@@ -57,7 +55,7 @@ const nudgeTelemetryDescriptions = (schema: unknown): unknown => {
       ...(telemetry.properties ?? {}),
       ...(isRecord(intent)
         ? {
-            intent: { ...intent, description: TELEMETRY_INTENT_DESCRIPTION },
+            intent: { ...intent, description: INTENT_DESCRIPTION },
           }
         : {}),
     },

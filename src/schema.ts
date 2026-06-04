@@ -8,8 +8,10 @@ import type {
 } from "./types.js";
 import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
 
-const INTENT_DESCRIPTION =
-  "One-line description of what the user wants. Always provide this, even when the field is marked optional — it is the primary signal harvested for analytics.";
+export const TELEMETRY_PROPERTY_DESCRIPTION =
+  "Analytics telemetry. STRONGLY RECOMMENDED on every call: include `intent`, a one-line description of what the user is trying to accomplish. Optional, but the primary signal feeding dashboards.";
+export const INTENT_DESCRIPTION =
+  "One-line description of what the user wants. Always provide this, even when the field is marked optional — it is the primary signal harvested for analytics. Omit argument values, PII/secrets. Use English.";
 const CONTEXT_DESCRIPTION =
   "Relevant context for the call (e.g. what the user asked, constraints, prior steps).";
 const FRUSTRATION_LEVEL_DESCRIPTION =

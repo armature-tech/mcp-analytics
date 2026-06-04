@@ -82,7 +82,7 @@ type McpAnalyticsConfig = {
     actorId?: string | ((input) => string | Promise<string>);
     enabled?: boolean;        // default true
     delivery?: "background" | "await"; // default "background"
-    timeoutMs?: number;       // default 4000
+    timeoutMs?: number;       // default 500
     emit?: (batch) => void | Promise<void>; // override the network emitter
     onError?: (error, batch) => void;
   };

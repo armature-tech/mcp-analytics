@@ -12,7 +12,7 @@ export const defaultMcpAnalyticsConfig = {
   armature: {
     endpointUrl: "https://app.armature.tech/api/mcp-analytics/ingest",
     enabled: true,
-    timeoutMs: 4_000,
+    timeoutMs: 500,
   },
 } satisfies McpAnalyticsConfig;
 
