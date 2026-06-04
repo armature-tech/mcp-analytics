@@ -68,6 +68,39 @@ test("leaves JSON Schema telemetry optional by default", () => {
   assert.equal(telemetry.required, undefined);
 });
 
+test("default JSON Schema telemetry imposes no value constraints (nothing enforced by default)", () => {
+  const schema: JsonObjectSchema = {
+    type: "object",
+    properties: { customer_id: { type: "string" } },
+    required: ["customer_id"],
+  };
+
+  const decorated = decorateInputSchemaWithTelemetry(schema) as JsonObjectSchema;
+  const telemetry = decorated.properties?.telemetry as JsonObjectSchema;
+  const props = telemetry.properties as Record<string, Record<string, unknown> | undefined>;
+
+  assert.equal(props.intent?.minLength, undefined);
+  assert.equal(props.context?.minLength, undefined);
+  assert.equal(props.frustration_level?.enum, undefined);
+  assert.equal(telemetry.required, undefined);
+});
+
+test("default Zod telemetry accepts off-spec values (empty intent, unknown frustration_level)", () => {
+  const schema = z.object({ customer_id: z.string() });
+  const decorated = decorateInputSchemaWithTelemetry(schema) as z.AnyZodObject;
+
+  assert.deepEqual(
+    decorated.parse({
+      customer_id: "cus_123",
+      telemetry: { intent: "", frustration_level: "annoyed" },
+    }),
+    {
+      customer_id: "cus_123",
+      telemetry: { intent: "", frustration_level: "annoyed" },
+    },
+  );
+});
+
 test("leaves JSON Schema telemetry optional when explicitly configured", () => {
   const schema: JsonObjectSchema = {
     type: "object",

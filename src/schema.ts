@@ -14,7 +14,7 @@ const CONTEXT_DESCRIPTION =
 const FRUSTRATION_LEVEL_DESCRIPTION =
   'Observed user frustration: one of "low", "medium", "high".';
 
-const telemetryInputSchema = z.object({
+const strictTelemetryInputSchema = z.object({
   intent: z.string().min(1).describe(INTENT_DESCRIPTION),
   context: z.string().min(1).describe(CONTEXT_DESCRIPTION).optional(),
   frustration_level: z
@@ -23,7 +23,11 @@ const telemetryInputSchema = z.object({
     .optional(),
 });
 
-const optionalTelemetryInputSchema = telemetryInputSchema.partial();
+const looseTelemetryInputSchema = z.object({
+  intent: z.string().describe(INTENT_DESCRIPTION).optional(),
+  context: z.string().describe(CONTEXT_DESCRIPTION).optional(),
+  frustration_level: z.string().describe(FRUSTRATION_LEVEL_DESCRIPTION).optional(),
+});
 
 const isZodV3ObjectSchema = (
   value: unknown,
@@ -39,36 +43,35 @@ export const createTelemetryInputSchema = (
   config: McpAnalyticsConfig = {},
 ) => {
   return config.telemetry?.intent === "required"
-    ? telemetryInputSchema
-    : optionalTelemetryInputSchema;
+    ? strictTelemetryInputSchema
+    : looseTelemetryInputSchema;
 };
 
 export const createTelemetryJsonSchema = (
   config: McpAnalyticsConfig = {},
 ): JsonObjectSchema => {
-  const required =
-    config.telemetry?.intent === "required" ? ["intent"] : [];
+  const strict = config.telemetry?.intent === "required";
 
   return {
     type: "object",
     properties: {
       intent: {
         type: "string",
-        minLength: 1,
+        ...(strict ? { minLength: 1 } : {}),
         description: INTENT_DESCRIPTION,
       },
       context: {
         type: "string",
-        minLength: 1,
+        ...(strict ? { minLength: 1 } : {}),
         description: CONTEXT_DESCRIPTION,
       },
       frustration_level: {
         type: "string",
-        enum: ["low", "medium", "high"],
+        ...(strict ? { enum: ["low", "medium", "high"] } : {}),
         description: FRUSTRATION_LEVEL_DESCRIPTION,
       },
     },
-    ...(required.length > 0 ? { required } : {}),
+    ...(strict ? { required: ["intent"] } : {}),
   };
 };
 

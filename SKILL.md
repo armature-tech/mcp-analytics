@@ -60,7 +60,7 @@ The SDK needs one credential, plus an optional URL override:
 | Variable | What it is |
 | --- | --- |
 | `ANALYTICS_INGEST_API_KEY` | Your Armature API key (created in the dashboard). Identifies the MCP server and signs each batch. |
-| `ANALYTICS_INGEST_URL` | Optional. Defaults to the prod endpoint `https://app.armature.tech/api/mcp-analytics/ingest`. Override for a local mock or staging environment. |
+| `ANALYTICS_INGEST_URL` | Optional. Defaults to the prod endpoint `https://app.armature.tech/api/mcp-analytics/ingest` (SDK ≥ 0.4.2). Override for a local mock or staging environment. On 0.4.1 and earlier the default was `http://127.0.0.1:8787/...` — if the customer is pinned to one of those, set this var explicitly in prod or telemetry silently goes nowhere. |
 
 Add `ANALYTICS_INGEST_API_KEY` to whatever env mechanism the project uses (`.env.example`,
 `wrangler.toml`, `vercel.json`, fly secrets, k8s manifests). Do **not** commit real values;
@@ -295,6 +295,14 @@ common cause: tools registered outside the factory in Shape A).
 
 A passing typecheck is not verification. The schema decoration and the authenticated batch are
 what matter — verify both.
+
+**Check 3 — Confirm the resolved endpoint URL.** Especially on serverless: log or inspect the
+`resolveEndpointUrl(config)` result (or just `process.env.ANALYTICS_INGEST_URL` if the customer
+set it) and confirm it points where they expect. On older SDK versions (≤ 0.4.1) the default
+silently fell through to `127.0.0.1:8787`, which means a successful build can still ship
+telemetry into the void in prod. If the customer is on the latest SDK and hasn't overridden,
+say "defaulting to `https://app.armature.tech/api/mcp-analytics/ingest`" out loud so they can
+catch it if that's wrong for their environment.
 
 ## Step 7: Mention the gotchas, then stop
 

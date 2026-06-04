@@ -258,7 +258,7 @@ Notes:
 
 | Variable | Purpose |
 | --- | --- |
-| `ANALYTICS_INGEST_URL` | Ingest endpoint (defaults to the local mock at `http://127.0.0.1:8787/api/mcp-analytics/ingest`) |
+| `ANALYTICS_INGEST_URL` | Ingest endpoint (defaults to `https://app.armature.tech/api/mcp-analytics/ingest`; override for a local mock or staging environment) |
 | `ANALYTICS_INGEST_API_KEY` | Your Armature API key — identifies the MCP server and signs each batch |
 
 ## Lower-level exports

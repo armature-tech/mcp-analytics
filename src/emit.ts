@@ -10,7 +10,7 @@ export const defaultMcpAnalyticsConfig = {
     intent: "optional",
   },
   armature: {
-    endpointUrl: "http://127.0.0.1:8787/api/mcp-analytics/ingest",
+    endpointUrl: "https://app.armature.tech/api/mcp-analytics/ingest",
     enabled: true,
     timeoutMs: 4_000,
   },

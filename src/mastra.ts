@@ -6,10 +6,17 @@ import type {
   RequestExtra,
 } from "./types.js";
 
-export type MastraToolExecute = (
-  inputData: unknown,
-  context?: unknown,
-) => unknown | Promise<unknown>;
+// `inputData` and `context` are `any` (not `unknown`) on purpose. Mastra's
+// `createTool({...}).execute` is typed
+// `(inputData: TInput, context: ToolExecutionContext<TInput>) => Promise<TOutput>`,
+// and function params are contravariant: a function declaring narrower params is
+// not assignable to one declaring `unknown`. With `unknown` here, every Mastra
+// adapter user had to cast their tool map in and out of `wrapMastraTools` just
+// to satisfy `tsc`. `any` opts both params out of variance checks while preserving
+// the SDK's structural-typing-only relationship with `@mastra/*` — we still import
+// nothing from Mastra at runtime.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type MastraToolExecute = (inputData: any, context?: any) => unknown | Promise<unknown>;
 
 export type MastraTool = {
   id?: string;

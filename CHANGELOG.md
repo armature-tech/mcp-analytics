@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.4.2
+
+### Default telemetry schema no longer enforces value constraints
+
+The decorated `telemetry` block was advertised as optional but still rejected calls when
+clients sent off-spec values: `intent: ""` (failed `min(1)`) or
+`frustration_level: "annoyed"` (failed the enum). That's enforcement leaking into the
+customer's tool surface — a misclassified frustration value from an LLM agent could fail
+the tool call.
+
+Default schema is now fully permissive: `intent`/`context`/`frustration_level` are all
+optional plain strings with no `minLength` or enum constraints (descriptions still hint at
+valid values for the agent). Opt back into strict validation with
+`telemetry: { intent: "required" }` — that mode still requires a non-empty `intent` and
+constrains `frustration_level` to the `low | medium | high` enum, same as before.
+
+### `MastraToolExecute` widened from `unknown` to `any` to eliminate adapter casts
+
+Mastra's `createTool({...}).execute` is typed
+`(inputData: TInput, context: ToolExecutionContext<TInput>) => Promise<TOutput>`.
+Function parameters are contravariant, so a function whose `inputData` / `context`
+params are narrower is not assignable to one whose params are `unknown` — customers
+had to cast their tool map into `wrapMastraTools` and cast the return back out just
+to satisfy `tsc`. Both params are now `any`, so narrower-typed tools assign in (and
+out) cleanly. The SDK still imports nothing from `@mastra/*` at runtime — this is a
+structural-typing fix, not a dependency change.
+
+### Default `endpointUrl` is now the prod ingest, not localhost
+
+`defaultMcpAnalyticsConfig.armature.endpointUrl` and the `resolveEndpointUrl` fallback
+now return `https://app.armature.tech/api/mcp-analytics/ingest` instead of
+`http://127.0.0.1:8787/api/mcp-analytics/ingest`. Customers who installed the SDK in a
+serverless prod environment without setting `ANALYTICS_INGEST_URL` were silently POSTing
+to localhost (nothing listening) and watching `onError` swallow the failure. With the
+prod default, the SDK works out-of-the-box in production and only requires
+`ANALYTICS_INGEST_URL` when pointing at a local mock or staging environment.
+
+Local development against `npm run dev:armature` still works —
+`instrumented-demo-client.ts` already sets `endpointUrl` explicitly, and any other local
+mock setup needs to set `ANALYTICS_INGEST_URL=http://127.0.0.1:8787/api/mcp-analytics/ingest`
+going forward.
+
 ## 0.4.0
 
 ### One credential instead of two — drop `mcpServerId`

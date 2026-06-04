@@ -5,6 +5,8 @@ import { createAnalyticsRecorder } from "../src/index.js";
 import {
   createMastraAnalytics,
   type MastraTool,
+  type MastraToolExecute,
+  type MastraToolMap,
   wrapMastraTools,
   wrapMastraToolsWithRecorder,
 } from "../src/mastra.js";
@@ -305,6 +307,58 @@ test("Mastra-wrapped tool with required-intent enforces telemetry.intent at pars
   );
   const ok = schema.parse({ id: "x", telemetry: { intent: "test" } });
   assert.deepEqual(ok, { id: "x", telemetry: { intent: "test" } });
+});
+
+// Structural simulation of Mastra's tool surface. We don't import @mastra/core
+// (~59 MB unpacked) just to demonstrate a type — the contravariance fix only cares
+// about the *shape* of the context param. If `MastraToolExecute['context']` ever
+// regresses from `any` back to `unknown`, the un-cast assignments below will fail
+// `tsc --noEmit` (run via `npm run typecheck:all`).
+type ToolExecutionContext<TInput> = {
+  context: TInput;
+  runtimeContext: { get(key: string): unknown };
+  // Mastra adds many more fields here in practice; one is enough to make the
+  // overall context type narrower than `unknown`.
+};
+type MastraCreatedTool<TInput, TOutput> = {
+  id: string;
+  description?: string;
+  inputSchema: z.ZodType<TInput>;
+  execute: (
+    inputData: TInput,
+    context: ToolExecutionContext<TInput>,
+  ) => Promise<TOutput>;
+};
+
+const createTool = <TInput, TOutput>(
+  def: MastraCreatedTool<TInput, TOutput>,
+): MastraCreatedTool<TInput, TOutput> => def;
+
+test("Mastra-shaped tool with narrower context assigns into wrapMastraTools without a cast (contravariance fix)", () => {
+  // This is the call site that previously required
+  //   wrapMastraTools(tools as unknown as Parameters<typeof wrapMastraTools>[0], ...)
+  // and a matching cast on the return. If `MastraToolExecute['context']` regresses
+  // to `unknown`, this assignment fails to typecheck.
+  const lookup = createTool({
+    id: "lookup_customer",
+    description: "Look up a customer.",
+    inputSchema: z.object({ customer_id: z.string() }),
+    execute: async (input, ctx) => {
+      // Narrower context is reachable inside the original handler — that's the
+      // whole reason we can't use `unknown` on the SDK side.
+      ctx.runtimeContext.get("session");
+      return { found: input.customer_id };
+    },
+  });
+
+  const toolMap: MastraToolMap = { lookup_customer: lookup };
+  const wrapped = wrapMastraTools(toolMap);
+  assert.ok(wrapped.lookup_customer);
+
+  // And the narrower execute signature directly satisfies MastraToolExecute —
+  // no cast needed at the function-value level either.
+  const _checkAssignable: MastraToolExecute = lookup.execute;
+  void _checkAssignable;
 });
 
 test("nudged JSON Schema also flows through wrapMastraTools for tools using JSON Schema inputSchema", async () => {
