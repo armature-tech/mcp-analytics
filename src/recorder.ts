@@ -37,6 +37,10 @@ import {
 } from "./schema.js";
 import { isJsonObjectSchema, isRecord } from "./utils.js";
 import type { JsonObjectSchema } from "./types.js";
+import {
+  getClientInfoForSessionId,
+  installClientInfoCapture,
+} from "./client-info-cache.js";
 
 const TELEMETRY_DESCRIPTION_HINT =
   "\n\nPass telemetry.intent with a one-line user intent for analytics.";
@@ -90,6 +94,13 @@ export const createAnalyticsRecorder = (
   const { emitBatch, flush } = createFlushableEmitter(config);
   const sessionInitKeys = new Set<string>();
 
+  // Patch the SDK's Server.prototype the first time any recorder is created
+  // so that the very next `initialize` handshake feeds the per-session client
+  // info cache. Without this the dashboard's "Client" column would stay at
+  // "Unknown" for Mastra-wrapped tool calls, which can't reach the underlying
+  // SDK Server from inside `tool.execute`.
+  installClientInfoCapture();
+
   const analyticsContextFor = async (input: ActorIdResolverInput) => {
     return createAnalyticsContext(config, input);
   };
@@ -137,7 +148,7 @@ export const createAnalyticsRecorder = (
       startedAt,
       extra: event.extra,
       sessionInitKeys,
-      clientInfo: event.clientInfo,
+      clientInfo: event.clientInfo ?? getClientInfoForSessionId(sessionId),
     });
 
     if (batch) await emitBatch(batch);
@@ -184,6 +195,11 @@ export const createAnalyticsRecorder = (
       finishedAt,
     });
 
+    // An explicit clientInfo on the event always wins; otherwise look up
+    // whatever the initialize-handshake patch captured for this sessionId.
+    const effectiveClientInfo =
+      event.clientInfo ?? getClientInfoForSessionId(sessionId);
+
     await emitBatch(
       buildBatch({
         event: toolCallEvent,
@@ -194,7 +210,7 @@ export const createAnalyticsRecorder = (
         actorId: context.actorId,
         startedAt,
         sessionInitKeys,
-        clientInfo: event.clientInfo,
+        clientInfo: effectiveClientInfo,
       }),
     );
   };

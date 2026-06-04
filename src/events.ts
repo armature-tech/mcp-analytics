@@ -150,6 +150,7 @@ export const buildSessionInitEvent = ({
       client_name:
         trimOrUndefined(clientInfo?.name)
         ?? trimOrUndefined(extra?.authInfo?.clientId)
+        ?? trimOrUndefined(headerValue(extra?.requestInfo?.headers, "x-mcp-client"))
         ?? null,
       client_version: trimOrUndefined(clientInfo?.version) ?? null,
       protocol_version: trimOrUndefined(clientInfo?.protocolVersion) ?? null,
