@@ -39,8 +39,7 @@ const { server, autumn } = createInstrumentedMockAutumnMcpServer(undefined, {
   armature: {
     ...defaultMcpAnalyticsConfig.armature,
     endpointUrl: `${armatureTelemetryUrl.replace(/\/telemetry$/, "")}/api/mcp-analytics/ingest`,
-    ingestSecret: "mock-secret",
-    mcpServerId: "mock-autumn-mcp-server",
+    apiKey: "mock-secret",
   },
 });
 const client = new Client({
@@ -95,7 +94,6 @@ try {
   assert.ok(Array.isArray(payload?.events));
   const event = payload?.events?.[0] as Record<string, unknown> | undefined;
   assert.equal(event?.kind, "tool_call");
-  assert.equal(event?.mcp_server_id, "mock-autumn-mcp-server");
   assert.equal(event?.ok, true);
   assert.equal((event?.metadata as Record<string, unknown>)?.tool_name, "create_customer");
   assert.equal((event?.metadata as Record<string, unknown>)?.intent, "Create a customer in the mock Autumn system.");

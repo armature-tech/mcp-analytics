@@ -58,8 +58,7 @@ export type McpAnalyticsConfig = {
   };
   armature?: {
     endpointUrl?: string;
-    ingestSecret?: string;
-    mcpServerId?: string;
+    apiKey?: string;
     actorId?: string | ActorIdResolver;
     enabled?: boolean;
     delivery?: "background" | "await";
@@ -194,7 +193,6 @@ export type AnalyticsEventKind = "tool_call" | "session_init";
 export type AnalyticsIngestEvent = {
   event_id: string;
   kind: AnalyticsEventKind;
-  mcp_server_id: string;
   actor_id: string;
   session_id_hint: string | null;
   started_at: string;

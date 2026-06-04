@@ -7,7 +7,7 @@ description: >
   "instrument my tools", "wire mcp-analytics into our server". Detects which integration
   shape fits the repo (registry-style McpServer, drop-in factory, dispatcher, or Mastra
   MCPServer), makes the edits, and verifies the wiring by checking the schema includes
-  the telemetry block and a test tool call produces a signed batch.
+  the telemetry block and a test tool call produces an authenticated batch.
 ---
 
 # Install @armature-tech/mcp-analytics into an MCP server
@@ -15,7 +15,7 @@ description: >
 You are integrating the `@armature-tech/mcp-analytics` SDK into a customer's MCP server
 codebase. The SDK decorates each tool's input schema with a `telemetry.*` block (so the
 agent can pass `intent`, `context`, `frustration_level`), strips those fields before the
-handler runs, and posts a signed batch to Armature after each call.
+handler runs, and posts an authenticated batch to Armature after each call.
 
 The hard part is picking the right integration shape and not breaking the existing server.
 Four shapes exist; pick one based on how the customer's code looks today.
@@ -50,31 +50,24 @@ npm install @armature-tech/mcp-analytics
 If they aren't, install them too. Use the customer's package manager (check for
 `pnpm-lock.yaml` / `yarn.lock` / `bun.lockb` and match it).
 
-The package is published to GitHub Packages under the `@armature-tech` scope. If `npm install`
-fails with 404, the project needs a `.npmrc`:
+The package is published to the public npm registry — `npm install` works without any
+`.npmrc` configuration.
 
-```
-@armature-tech:registry=https://npm.pkg.github.com
-```
+## Step 3: Add the API key environment variable
 
-Mention this once; don't litter the project with auth instructions.
-
-## Step 3: Add the three environment variables
-
-The SDK needs:
+The SDK needs one credential, plus an optional URL override:
 
 | Variable | What it is |
 | --- | --- |
-| `ANALYTICS_INGEST_URL` | `https://app.armature.tech/api/mcp-analytics/ingest` for prod |
-| `ANALYTICS_MCP_SERVER_ID` | The MCP server id from the Armature dashboard |
-| `ANALYTICS_INGEST_SECRET` | The shared secret from the Armature dashboard |
+| `ANALYTICS_INGEST_API_KEY` | Your Armature API key (created in the dashboard). Identifies the MCP server and signs each batch. |
+| `ANALYTICS_INGEST_URL` | Optional. Defaults to the prod endpoint `https://app.armature.tech/api/mcp-analytics/ingest`. Override for a local mock or staging environment. |
 
-Add them to whatever env mechanism the project uses (`.env.example`, `wrangler.toml`,
-`vercel.json`, fly secrets, k8s manifests). Do **not** commit real values; put placeholders
-in `.env.example` and tell the user where to paste the real ones.
+Add `ANALYTICS_INGEST_API_KEY` to whatever env mechanism the project uses (`.env.example`,
+`wrangler.toml`, `vercel.json`, fly secrets, k8s manifests). Do **not** commit real values;
+put a placeholder in `.env.example` and tell the user where to paste the real one.
 
-If either `ANALYTICS_MCP_SERVER_ID` or `ANALYTICS_INGEST_SECRET` is missing at runtime,
-the SDK silently no-ops. That's intentional for local dev — say so once, don't add guards.
+If `ANALYTICS_INGEST_API_KEY` is missing at runtime, the SDK silently no-ops. That's intentional
+for local dev — say so once, don't add guards.
 
 ## Step 4: Pick a delivery mode
 
@@ -109,7 +102,7 @@ const server = createMcpAnalyticsServer(
   () => createMyMcpServer(),
   {
     armature: {
-      // endpointUrl / mcpServerId / ingestSecret default to env vars
+      // endpointUrl / apiKey default to env vars
       delivery: "await", // or "background" — see Step 4
     },
   },
@@ -300,7 +293,7 @@ common cause: tools registered outside the factory in Shape A).
 - Set `armature.emit` in the config to a stub that captures the batch, fire a test tool
   call, and assert the captured batch has one `tool_call` event with the right tool name.
 
-A passing typecheck is not verification. The schema decoration and the signed batch are
+A passing typecheck is not verification. The schema decoration and the authenticated batch are
 what matter — verify both.
 
 ## Step 7: Mention the gotchas, then stop
@@ -308,11 +301,10 @@ what matter — verify both.
 Tell the user, briefly:
 
 - `delivery: "background"` drops batches in serverless. You picked `"await"` (or not — say which).
-- The SDK no-ops silently if env vars are missing. Set them in prod.
-- The package is on GitHub Packages, so CI needs the `.npmrc` line from Step 2 with a `NODE_AUTH_TOKEN`.
+- The SDK no-ops silently if `ANALYTICS_INGEST_API_KEY` is missing. Set it in prod.
 
 Don't pad with anything else. End with one line: what you changed and what the user needs
-to do (paste the secrets, deploy).
+to do (paste the API key, deploy).
 
 ## What NOT to do
 
@@ -320,7 +312,7 @@ to do (paste the secrets, deploy).
   via `onError`. Wrapping it adds noise.
 - Don't add a `try/catch` around `flush()` either. Pass `onError` in config if the user
   wants custom handling.
-- Don't expose the ingest secret to the client side — it's server-only. If you see it
+- Don't expose `ANALYTICS_INGEST_API_KEY` to the client side — it's server-only. If you see it
   imported in a browser bundle path, stop and flag it.
 - Don't rewrite tool definitions to "match the SDK style" if Shape A works. Minimum
   change wins.

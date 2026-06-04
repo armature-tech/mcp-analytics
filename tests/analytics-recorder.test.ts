@@ -195,7 +195,6 @@ test("recorder emits tool calls with session-init dedup and ctx actor resolver",
   const seenActorInputs: unknown[] = [];
   const recorder = createAnalyticsRecorder({
     armature: {
-      mcpServerId: "recorder-test-server",
       delivery: "await",
       actorId: ({ ctx }) => {
         seenActorInputs.push(ctx);
@@ -231,7 +230,6 @@ test("recorder emits tool calls with session-init dedup and ctx actor resolver",
   });
 
   const expectedActorId = buildActorId({
-    mcpServerId: "recorder-test-server",
     actorSeed: "user_123",
   });
 
@@ -255,7 +253,6 @@ test("recorder flush waits for background delivery", async () => {
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = createAnalyticsRecorder({
     armature: {
-      mcpServerId: "flush-test-server",
       actorId: "flush-user",
       emit: (batch) => {
         batches.push(batch);
@@ -281,7 +278,6 @@ test("instrumentToolCall strips telemetry, passes the typed result through, and 
   let receivedArgs: unknown = null;
   const recorder = createAnalyticsRecorder({
     armature: {
-      mcpServerId: "instrument-success",
       delivery: "await",
       actorId: "actor-a",
       emit: (batch) => {
@@ -321,7 +317,6 @@ test("recorder.tool registers a handler that dispatches with stripped args and r
   const seenContext: { ctx?: unknown; sessionId?: string }[] = [];
   const recorder = createAnalyticsRecorder({
     armature: {
-      mcpServerId: "registry-server",
       delivery: "await",
       actorId: "registry-actor",
       emit: (batch) => {
@@ -385,7 +380,6 @@ test("recorder.dispatch on an unknown tool name throws and records nothing", asy
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = createAnalyticsRecorder({
     armature: {
-      mcpServerId: "registry-unknown",
       delivery: "await",
       actorId: "unknown-actor",
       emit: (batch) => {
@@ -405,7 +399,6 @@ test("recorder.tool returns the wrapped handler so it can be invoked directly", 
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = createAnalyticsRecorder({
     armature: {
-      mcpServerId: "registry-direct",
       delivery: "await",
       actorId: "direct-actor",
       emit: (batch) => {
@@ -434,7 +427,6 @@ test("instrumentToolCall records errors, rethrows, and still strips telemetry fr
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = createAnalyticsRecorder({
     armature: {
-      mcpServerId: "instrument-error",
       delivery: "await",
       actorId: "actor-b",
       emit: (batch) => {
@@ -470,7 +462,6 @@ test("recorder.createMcpServer round-trips a tool call through real MCP transpor
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = createAnalyticsRecorder({
     armature: {
-      mcpServerId: "mcp-server-registry",
       delivery: "await",
       actorId: "mcp-actor",
       emit: (batch) => {
@@ -538,7 +529,6 @@ test("recorder.tool registered after attachToMcpServer still reaches the attache
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = createAnalyticsRecorder({
     armature: {
-      mcpServerId: "mcp-server-late-attach",
       delivery: "await",
       actorId: "late-attach-actor",
       emit: (batch) => {
@@ -593,7 +583,6 @@ test("recorder.tool registered after attachToMcpServer still reaches the attache
 
 test("buildSessionInitEvent populates harness fields from clientInfo", () => {
   const event = buildSessionInitEvent({
-    mcpServerId: "srv",
     actorId: "actor",
     sessionId: "session-abc",
     requestId: "req-1",
@@ -618,7 +607,6 @@ test("buildSessionInitEvent populates harness fields from clientInfo", () => {
 
 test("buildSessionInitEvent falls back to authInfo.clientId for client_name when clientInfo is absent", () => {
   const event = buildSessionInitEvent({
-    mcpServerId: "srv",
     actorId: "actor",
     sessionId: "session-abc",
     requestId: "req-2",
@@ -638,7 +626,6 @@ test("buildSessionInitEvent falls back to authInfo.clientId for client_name when
 test("buildSessionInitEvent drops capabilities >4 KB to null instead of truncating", () => {
   const big = { tools: { list: "x".repeat(5_000) } };
   const event = buildSessionInitEvent({
-    mcpServerId: "srv",
     actorId: "actor",
     sessionId: "session-abc",
     requestId: "req-3",
@@ -655,7 +642,6 @@ test("buildSessionInitEvent drops capabilities >4 KB to null instead of truncati
 
 test("buildSessionInitEvent prefers clientInfo.name over authInfo.clientId", () => {
   const event = buildSessionInitEvent({
-    mcpServerId: "srv",
     actorId: "actor",
     sessionId: "session-abc",
     requestId: "req-4",
@@ -671,7 +657,6 @@ test("instrumentToolCall with header-only sessionId + clientInfo emits harness f
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = createAnalyticsRecorder({
     armature: {
-      mcpServerId: "harness-capture",
       delivery: "await",
       actorId: "harness-actor",
       emit: (batch) => {
@@ -719,7 +704,7 @@ test("instrumentToolCall with header-only sessionId + clientInfo emits harness f
 
 test("attaching the same recorder to two McpServers throws", () => {
   const recorder = createAnalyticsRecorder({
-    armature: { mcpServerId: "double-attach", actorId: "x" },
+    armature: { actorId: "x" },
   });
 
   recorder.createMcpServer({ name: "first", version: "0.0.1" });

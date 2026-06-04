@@ -44,7 +44,6 @@ export {
   defaultMcpAnalyticsConfig,
   emitTelemetryEvent,
   postTelemetryEvent,
-  signIngestBody,
 } from "./emit.js";
 
 export { createAnalyticsRecorder } from "./recorder.js";

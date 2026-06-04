@@ -38,27 +38,23 @@ const capCapabilities = (
 };
 
 export const buildActorId = ({
-  mcpServerId,
   actorSeed,
 }: {
-  mcpServerId: string;
   actorSeed: string;
 }) => {
-  return sha256Hex(`${mcpServerId} ${actorSeed}`);
+  return sha256Hex(actorSeed);
 };
 
 export const buildEventId = ({
-  mcpServerId,
   actorId,
   requestId,
   kind,
 }: {
-  mcpServerId: string;
   actorId: string;
   requestId: string;
   kind: AnalyticsEventKind;
 }) => {
-  return sha256Hex(`${mcpServerId} ${actorId} ${kind} ${requestId}`);
+  return sha256Hex(`${actorId} ${kind} ${requestId}`);
 };
 
 const buildToolCallSource = (toolName: string, input: unknown) => {
@@ -73,7 +69,6 @@ export const buildToolCallEvent = ({
   status,
   durationMs,
   errorMessage,
-  mcpServerId,
   actorId,
   sessionId,
   requestId,
@@ -87,7 +82,6 @@ export const buildToolCallEvent = ({
   status: "ok" | "error";
   durationMs: number;
   errorMessage?: string;
-  mcpServerId: string;
   actorId: string;
   sessionId?: string;
   requestId: string;
@@ -101,9 +95,8 @@ export const buildToolCallEvent = ({
     : truncateUtf8(stringifyPreview(output), MAX_PREVIEW_BYTES);
 
   return {
-    event_id: buildEventId({ mcpServerId, actorId, requestId, kind: "tool_call" }),
+    event_id: buildEventId({ actorId, requestId, kind: "tool_call" }),
     kind: "tool_call",
-    mcp_server_id: mcpServerId,
     actor_id: actorId,
     session_id_hint: sessionId ?? null,
     started_at: startedAt,
@@ -129,7 +122,6 @@ export const buildToolCallEvent = ({
 };
 
 export const buildSessionInitEvent = ({
-  mcpServerId,
   actorId,
   sessionId,
   requestId,
@@ -137,7 +129,6 @@ export const buildSessionInitEvent = ({
   extra,
   clientInfo,
 }: {
-  mcpServerId: string;
   actorId: string;
   sessionId: string;
   requestId: string;
@@ -146,9 +137,8 @@ export const buildSessionInitEvent = ({
   clientInfo?: McpClientInfo;
 }): AnalyticsIngestEvent => {
   return {
-    event_id: buildEventId({ mcpServerId, actorId, requestId, kind: "session_init" }),
+    event_id: buildEventId({ actorId, requestId, kind: "session_init" }),
     kind: "session_init",
-    mcp_server_id: mcpServerId,
     actor_id: actorId,
     session_id_hint: sessionId,
     started_at: startedAt,
@@ -179,7 +169,6 @@ export const buildSessionInitEvent = ({
 export const buildBatch = ({
   event,
   extra,
-  mcpServerId,
   actorId,
   startedAt,
   sessionInitKeys,
@@ -187,7 +176,6 @@ export const buildBatch = ({
 }: {
   event: AnalyticsIngestEvent;
   extra?: RequestExtra;
-  mcpServerId: string;
   actorId: string;
   startedAt: string;
   sessionInitKeys: Set<string>;
@@ -196,11 +184,10 @@ export const buildBatch = ({
   const events: AnalyticsIngestEvent[] = [];
 
   if (extra?.sessionId) {
-    const key = `${mcpServerId}:${actorId}:${extra.sessionId}`;
+    const key = `${actorId}:${extra.sessionId}`;
     if (!sessionInitKeys.has(key)) {
       sessionInitKeys.add(key);
       events.push(buildSessionInitEvent({
-        mcpServerId,
         actorId,
         sessionId: extra.sessionId,
         requestId: `${event.event_id}:session_init`,
@@ -216,7 +203,6 @@ export const buildBatch = ({
 };
 
 export const buildSessionInitBatch = ({
-  mcpServerId,
   actorId,
   sessionId,
   requestId,
@@ -225,7 +211,6 @@ export const buildSessionInitBatch = ({
   sessionInitKeys,
   clientInfo,
 }: {
-  mcpServerId: string;
   actorId: string;
   sessionId: string;
   requestId: string;
@@ -234,7 +219,7 @@ export const buildSessionInitBatch = ({
   sessionInitKeys: Set<string>;
   clientInfo?: McpClientInfo;
 }): AnalyticsIngestBatch | null => {
-  const key = `${mcpServerId}:${actorId}:${sessionId}`;
+  const key = `${actorId}:${sessionId}`;
   if (sessionInitKeys.has(key)) return null;
 
   sessionInitKeys.add(key);
@@ -242,7 +227,6 @@ export const buildSessionInitBatch = ({
     schema_version: SCHEMA_VERSION,
     events: [
       buildSessionInitEvent({
-        mcpServerId,
         actorId,
         sessionId,
         requestId,

@@ -1,4 +1,3 @@
-import { createHmac } from "node:crypto";
 import type {
   ActorIdResolverInput,
   AnalyticsIngestBatch,
@@ -23,12 +22,8 @@ export const resolveEndpointUrl = (config: McpAnalyticsConfig) => {
     defaultMcpAnalyticsConfig.armature.endpointUrl;
 };
 
-export const resolveIngestSecret = (config: McpAnalyticsConfig) => {
-  return config.armature?.ingestSecret ?? readEnv("ANALYTICS_INGEST_SECRET");
-};
-
-export const resolveMcpServerId = (config: McpAnalyticsConfig) => {
-  return config.armature?.mcpServerId ?? readEnv("ANALYTICS_MCP_SERVER_ID");
+export const resolveApiKey = (config: McpAnalyticsConfig) => {
+  return config.armature?.apiKey ?? readEnv("ANALYTICS_INGEST_API_KEY");
 };
 
 export const resolveActorSeed = async (
@@ -50,29 +45,18 @@ export const resolveActorSeed = async (
   return "anonymous";
 };
 
-export const signIngestBody = (
-  body: string,
-  secret: string,
-  timestamp: string,
-) => {
-  return createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
-};
-
 export const postTelemetryEvent = async (
   batch: AnalyticsIngestBatch,
   config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
 ) => {
   const endpointUrl = resolveEndpointUrl(config);
-  const ingestSecret = resolveIngestSecret(config);
-  const mcpServerId = resolveMcpServerId(config);
+  const apiKey = resolveApiKey(config);
 
-  if (!ingestSecret || !mcpServerId) {
+  if (!apiKey) {
     return { skipped: true, reason: "ingest_config_missing" };
   }
 
   const body = JSON.stringify(batch);
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const signature = signIngestBody(body, ingestSecret, timestamp);
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
@@ -84,9 +68,7 @@ export const postTelemetryEvent = async (
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Armature-MCP-Server-Id": mcpServerId,
-        "X-Armature-Timestamp": timestamp,
-        "X-Armature-Signature": signature,
+        Authorization: `Bearer ${apiKey}`,
       },
       body,
       signal: controller.signal,

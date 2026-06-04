@@ -1,6 +1,6 @@
 # @armature-tech/mcp-analytics
 
-Wrapper SDK that instruments MCP servers with analytics telemetry. It decorates each registered tool's input schema with optional `telemetry.*` fields, strips those fields before the original handler runs, and posts a signed ingest batch to Armature after the handler returns.
+Wrapper SDK that instruments MCP servers with analytics telemetry. It decorates each registered tool's input schema with optional `telemetry.*` fields, strips those fields before the original handler runs, and posts an authenticated ingest batch to Armature after the handler returns.
 
 The SDK is a drop-in for any server built on `@modelcontextprotocol/sdk`'s `McpServer`. It does not introduce a middleware server and does not modify the arguments the original handler sees.
 
@@ -27,8 +27,7 @@ import { z } from "zod";
 const analytics = createAnalyticsRecorder({
   armature: {
     endpointUrl: "https://app.armature.tech/api/mcp-analytics/ingest",
-    mcpServerId: process.env.ANALYTICS_MCP_SERVER_ID,
-    ingestSecret: process.env.ANALYTICS_INGEST_SECRET,
+    apiKey: process.env.ANALYTICS_INGEST_API_KEY,
   },
 });
 
@@ -60,8 +59,7 @@ const server = createMcpAnalyticsServer(
   {
     armature: {
       endpointUrl: "https://app.armature.tech/api/mcp-analytics/ingest",
-      mcpServerId: process.env.ANALYTICS_MCP_SERVER_ID,
-      ingestSecret: process.env.ANALYTICS_INGEST_SECRET,
+      apiKey: process.env.ANALYTICS_INGEST_API_KEY,
     },
   },
 );
@@ -79,8 +77,7 @@ import { createAnalyticsRecorder } from "@armature-tech/mcp-analytics";
 const analytics = createAnalyticsRecorder({
   armature: {
     endpointUrl: "https://app.armature.tech/api/mcp-analytics/ingest",
-    mcpServerId: process.env.ANALYTICS_MCP_SERVER_ID,
-    ingestSecret: process.env.ANALYTICS_INGEST_SECRET,
+    apiKey: process.env.ANALYTICS_INGEST_API_KEY,
     delivery: "await",
     actorId: ({ ctx }) => (ctx as RequestContext).userProfileId,
   },
@@ -128,8 +125,7 @@ new MCPServer({
   tools: wrapMastraTools(createMyTools(), {
     armature: {
       endpointUrl: "https://app.armature.tech/api/mcp-analytics/ingest",
-      mcpServerId: process.env.ANALYTICS_MCP_SERVER_ID,
-      ingestSecret: process.env.ANALYTICS_INGEST_SECRET,
+      apiKey: process.env.ANALYTICS_INGEST_API_KEY,
       delivery: "await",
     },
   }),
@@ -225,7 +221,7 @@ The `telemetry` object is stripped before your handler runs. Your tool receives 
 
 ### What Armature receives
 
-After each tool call (success or error), the SDK posts a signed batch to `endpointUrl` containing a `tool_call` event with timing, status, the input/output previews, and the telemetry fields the agent supplied. The first event for a new `sessionId` is preceded by a `session_init` event.
+After each tool call (success or error), the SDK posts an authenticated batch to `endpointUrl` containing a `tool_call` event with timing, status, the input/output previews, and the telemetry fields the agent supplied. The first event for a new `sessionId` is preceded by a `session_init` event.
 
 ## Configuration
 
@@ -236,8 +232,7 @@ type McpAnalyticsConfig = {
   };
   armature?: {
     endpointUrl?: string;     // default reads ANALYTICS_INGEST_URL
-    mcpServerId?: string;     // default reads ANALYTICS_MCP_SERVER_ID
-    ingestSecret?: string;    // default reads ANALYTICS_INGEST_SECRET
+    apiKey?: string;          // default reads ANALYTICS_INGEST_API_KEY
     actorId?: string | ((input) => string | Promise<string>);
     enabled?: boolean;        // default true
     delivery?: "background" | "await"; // default "background"
@@ -250,18 +245,17 @@ type McpAnalyticsConfig = {
 
 Notes:
 
-- If `ingestSecret` or `mcpServerId` is missing, the SDK silently skips delivery — useful for local development.
+- If `apiKey` is missing, the SDK silently skips delivery — useful for local development.
 - `delivery: "background"` (default) returns the tool result immediately and posts the batch on `setImmediate`. Use `delivery: "await"` in serverless environments where the function may exit before background work finishes.
-- The actor id is a SHA-256 of `mcpServerId` + an actor seed. By default the seed comes from the request's auth token / client id / authorization header. Pass a static `armature.actorId` seed for a stable source, or pass a function to derive the seed from `{ ctx, extra, headers, authInfo, toolName, telemetry }`.
-- The signed request includes `X-Armature-Timestamp`, `X-Armature-Signature` (HMAC-SHA256 of `timestamp.body`), and `X-Armature-MCP-Server-Id` headers.
+- The actor id is a SHA-256 of the actor seed. By default the seed comes from the request's auth token / client id / authorization header. Pass a static `armature.actorId` seed for a stable source, or pass a function to derive the seed from `{ ctx, extra, headers, authInfo, toolName, telemetry }`. Armature scopes the resulting actor id to your server via the API key, so the same seed under two different servers stays linked to the same person (cross-surface analytics).
+- Each batch is POSTed with `Authorization: Bearer <apiKey>`. The server identity is resolved from the API key — no separate header.
 
 ## Environment variables
 
 | Variable | Purpose |
 | --- | --- |
 | `ANALYTICS_INGEST_URL` | Ingest endpoint (defaults to the local mock at `http://127.0.0.1:8787/api/mcp-analytics/ingest`) |
-| `ANALYTICS_MCP_SERVER_ID` | The MCP server's id registered with Armature |
-| `ANALYTICS_INGEST_SECRET` | Shared secret used to sign each batch |
+| `ANALYTICS_INGEST_API_KEY` | Your Armature API key — identifies the MCP server and signs each batch |
 
 ## Lower-level exports
 
@@ -272,7 +266,6 @@ For custom integrations the package also exports building blocks used internally
 - `decorateInputSchemaWithTelemetry(schema, config)` / `createTelemetryInputSchema(config)` / `createTelemetryJsonSchema(config)`
 - `extractTelemetryArguments(args)` — split `{ telemetry, ...args }`
 - `buildToolCallEvent(...)`, `buildActorId(...)`, `buildEventId(...)`
-- `signIngestBody(body, secret, timestamp)`
 - `postTelemetryEvent(batch, config)` / `emitTelemetryEvent(batch, config)`
 - `defaultMcpAnalyticsConfig`
 

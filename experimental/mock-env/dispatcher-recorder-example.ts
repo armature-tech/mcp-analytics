@@ -12,7 +12,6 @@ type LookupCustomerArgs = {
 
 const analytics = createAnalyticsRecorder({
   armature: {
-    mcpServerId: "mock-dispatcher",
     actorId: ({ ctx }) => (ctx as RequestContext).userProfileId,
     delivery: "await",
   },

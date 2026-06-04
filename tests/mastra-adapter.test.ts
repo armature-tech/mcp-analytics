@@ -13,7 +13,6 @@ import type { AnalyticsIngestBatch, JsonObjectSchema } from "../src/types.js";
 const makeRecorder = (batches: AnalyticsIngestBatch[]) =>
   createAnalyticsRecorder({
     armature: {
-      mcpServerId: "mastra-test-server",
       delivery: "await",
       actorId: "mastra-test-actor",
       emit: (batch) => {
@@ -174,7 +173,6 @@ test("config.armature.actorId resolver receives Mastra's context as ctx", async 
   const seenCtx: unknown[] = [];
   const recorder = createAnalyticsRecorder({
     armature: {
-      mcpServerId: "mastra-actor-id",
       delivery: "await",
       actorId: ({ ctx }) => {
         seenCtx.push(ctx);
@@ -264,7 +262,6 @@ test("createMastraAnalytics exposes recorder + flush for shared use", async () =
   const batches: AnalyticsIngestBatch[] = [];
   const analytics = createMastraAnalytics({
     armature: {
-      mcpServerId: "mastra-shared",
       actorId: "shared-actor",
       emit: (batch) => {
         batches.push(batch);

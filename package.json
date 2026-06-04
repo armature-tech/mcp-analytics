@@ -1,6 +1,6 @@
 {
   "name": "@armature-tech/mcp-analytics",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "type": "module",
   "description": "MCP analytics wrapper SDK that instruments MCP tool declarations with telemetry.",
   "license": "Apache-2.0",

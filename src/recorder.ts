@@ -28,7 +28,6 @@ import {
   createFlushableEmitter,
   defaultMcpAnalyticsConfig,
   resolveActorSeed,
-  resolveMcpServerId,
 } from "./emit.js";
 import {
   decorateInputSchemaWithTelemetry,
@@ -82,17 +81,9 @@ const appendTelemetryHint = (description: string | undefined) => {
 const createAnalyticsContext = async (
   config: McpAnalyticsConfig,
   input: ActorIdResolverInput,
-): Promise<{ mcpServerId: string; actorId: string } | null> => {
-  const mcpServerId = resolveMcpServerId(config);
-  if (!mcpServerId) return null;
-
+): Promise<{ actorId: string }> => {
   const actorSeed = await resolveActorSeed(config, input);
-  const actorId = buildActorId({
-    mcpServerId,
-    actorSeed,
-  });
-
-  return { mcpServerId, actorId };
+  return { actorId: buildActorId({ actorSeed }) };
 };
 
 export const createAnalyticsRecorder = (
@@ -135,7 +126,6 @@ export const createAnalyticsRecorder = (
       headers: event.headers ?? event.extra?.requestInfo?.headers,
       authInfo: event.authInfo ?? event.extra?.authInfo,
     });
-    if (!context) return;
 
     const finishedAtMs = Date.now();
     const startedAt = normalizeStartedAt({
@@ -143,7 +133,6 @@ export const createAnalyticsRecorder = (
       finishedAtMs,
     });
     const batch = buildSessionInitBatch({
-      mcpServerId: context.mcpServerId,
       actorId: context.actorId,
       sessionId,
       requestId: event.requestId ?? randomUUID(),
@@ -165,7 +154,6 @@ export const createAnalyticsRecorder = (
       toolName: event.name,
       telemetry: event.telemetry,
     });
-    if (!context) return;
 
     const finishedAtMs = Date.now();
     const finishedAt = new Date(finishedAtMs).toISOString();
@@ -191,7 +179,6 @@ export const createAnalyticsRecorder = (
       status: event.status,
       durationMs,
       errorMessage,
-      mcpServerId: context.mcpServerId,
       actorId: context.actorId,
       sessionId,
       requestId,
@@ -206,7 +193,6 @@ export const createAnalyticsRecorder = (
           ...(event.extra ?? {}),
           ...(sessionId ? { sessionId } : {}),
         },
-        mcpServerId: context.mcpServerId,
         actorId: context.actorId,
         startedAt,
         sessionInitKeys,
