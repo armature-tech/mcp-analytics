@@ -1,6 +1,6 @@
 # @armature-tech/mcp-analytics
 
-[Armature](https://app.armature.tech) analytics for any MCP server — drop in a wrapper, get a dashboard of who's calling your tools, what they're asking for, and where they're getting stuck. On Armature you can see:
+[Armature](https://armature.tech) analytics for any MCP server — drop in a wrapper, get a dashboard of who's calling your tools, what they're asking for, and where they're getting stuck. On Armature you can see:
 
 - Who your users are and which tools they actually use
 - What agents are *trying* to accomplish (intent, context, frustration captured per call)
