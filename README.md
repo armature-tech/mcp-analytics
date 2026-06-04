@@ -49,13 +49,13 @@ Decorate input schemas, strip telemetry fields before the handler runs, time the
 
 **3) The agent should be able to tell you what it's doing.**
 
-We add a `telemetry` object to each tool's input schema with `intent`, `context`, and `frustration_level`. Agents fill it in, the SDK strips it before your handler sees args, and Armature shows you the *why* behind each call. Optional by default — set `telemetry: { intent: "required" }` to force it.
+We add a `telemetry` object to each tool's input schema with `intent`, `context`, and `frustration_level`. Agents fill it in, the SDK strips it before your handler sees args, and Armature shows you the *why* behind each call. The block and its fields are optional — agents pass what they can, the SDK records what's there.
 
 ## How it works
 
 Three things happen on every tool call:
 
-1. **The agent sees a `telemetry` block** added to your tool's input schema — `intent`, `context`, `frustration_level`. Optional by default; set `telemetry: { intent: "required" }` to force it.
+1. **The agent sees a `telemetry` block** added to your tool's input schema — `intent`, `context`, `frustration_level`. The block is optional; the SDK never rejects a call for omitting it.
 2. **Your handler sees its original args.** The SDK strips `telemetry` before invoking it.
 3. **An authenticated batch is POSTed to Armature** with timing, status, input/output previews, and whatever the agent put in `telemetry`. The first call on a new `sessionId` is preceded by a `session_init` event.
 
@@ -73,9 +73,6 @@ Code examples for all three live in [`SKILL.md`](SKILL.md).
 
 ```ts
 type McpAnalyticsConfig = {
-  telemetry?: {
-    intent?: "required" | "optional"; // default "optional"
-  };
   armature?: {
     endpointUrl?: string;     // default reads ANALYTICS_INGEST_URL
     apiKey?: string;          // default reads ANALYTICS_INGEST_API_KEY
@@ -88,6 +85,8 @@ type McpAnalyticsConfig = {
   };
 };
 ```
+
+The shape of the `telemetry` block on each tool's input schema is Armature-owned and not customer-configurable. Customers only set operational config (delivery, actor id, transport).
 
 **Delivery mode.** `"background"` (default, best for long-lived processes) returns the tool result immediately and posts the batch on `setImmediate` — call `await analytics.flush()` at shutdown. `"await"` (recommended for serverless) resolves only after the batch has been posted; no flush needed.
 

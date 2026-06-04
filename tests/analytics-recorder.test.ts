@@ -85,6 +85,18 @@ test("default JSON Schema telemetry imposes no value constraints (nothing enforc
   assert.equal(telemetry.required, undefined);
 });
 
+test("default Zod telemetry is fully optional — parses inputs that omit the telemetry block entirely", () => {
+  // Regression: prior to making the loose telemetry schema `.optional()` the parent
+  // ZodObject treated `telemetry` as a required field, so every PRIA-style call
+  // that did not include the (optional) block threw at the MCP input boundary.
+  const schema = z.object({ customer_id: z.string() });
+  const decorated = decorateInputSchemaWithTelemetry(schema) as z.AnyZodObject;
+  assert.deepEqual(
+    decorated.parse({ customer_id: "cus_123" }),
+    { customer_id: "cus_123" },
+  );
+});
+
 test("default Zod telemetry accepts off-spec values (empty intent, unknown frustration_level)", () => {
   const schema = z.object({ customer_id: z.string() });
   const decorated = decorateInputSchemaWithTelemetry(schema) as z.AnyZodObject;

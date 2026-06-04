@@ -2,8 +2,8 @@ import { z } from "zod";
 import * as zv4 from "zod/v4";
 import type {
   ExtractedToolArguments,
+  InternalMcpAnalyticsConfig,
   JsonObjectSchema,
-  McpAnalyticsConfig,
   TelemetryArgs,
 } from "./types.js";
 import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
@@ -78,22 +78,25 @@ const isZodV3ObjectSchema = (
   );
 };
 
+// Loose mode wraps the telemetry object with `.optional()` so callers that omit
+// the `telemetry` key entirely still parse. Strict mode keeps the object itself
+// required (and `intent` required inside).
 export const createTelemetryInputSchema = (
-  config: McpAnalyticsConfig = {},
+  config: InternalMcpAnalyticsConfig = {},
 ) => {
   return config.telemetry?.intent === "required"
     ? strictTelemetryInputSchema
-    : looseTelemetryInputSchema;
+    : looseTelemetryInputSchema.optional();
 };
 
-const createTelemetryInputSchemaV4 = (config: McpAnalyticsConfig) => {
+const createTelemetryInputSchemaV4 = (config: InternalMcpAnalyticsConfig) => {
   return config.telemetry?.intent === "required"
     ? strictTelemetryInputSchemaV4
-    : looseTelemetryInputSchemaV4;
+    : looseTelemetryInputSchemaV4.optional();
 };
 
 export const createTelemetryJsonSchema = (
-  config: McpAnalyticsConfig = {},
+  config: InternalMcpAnalyticsConfig = {},
 ): JsonObjectSchema => {
   const strict = config.telemetry?.intent === "required";
 
@@ -122,7 +125,7 @@ export const createTelemetryJsonSchema = (
 
 const decorateJsonSchemaWithTelemetry = (
   inputSchema: JsonObjectSchema,
-  config: McpAnalyticsConfig,
+  config: InternalMcpAnalyticsConfig,
 ): JsonObjectSchema => {
   const existingRequired = Array.isArray(inputSchema.required)
     ? inputSchema.required
@@ -144,7 +147,7 @@ const decorateJsonSchemaWithTelemetry = (
 
 export const decorateInputSchemaWithTelemetry = (
   inputSchema: unknown,
-  config: McpAnalyticsConfig = {},
+  config: InternalMcpAnalyticsConfig = {},
 ) => {
   if (inputSchema === undefined) {
     return { telemetry: createTelemetryInputSchema(config) };

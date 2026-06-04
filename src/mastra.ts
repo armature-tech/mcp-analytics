@@ -2,6 +2,7 @@ import { createAnalyticsRecorder } from "./recorder.js";
 import { decorateInputSchemaWithTelemetry } from "./schema.js";
 import type {
   AnalyticsRecorder,
+  InternalMcpAnalyticsConfig,
   McpAnalyticsConfig,
   RequestExtra,
 } from "./types.js";
@@ -37,7 +38,7 @@ const wrapOneTool = (
   toolKey: string,
   tool: MastraTool,
   recorder: AnalyticsRecorder,
-  config: McpAnalyticsConfig,
+  config: InternalMcpAnalyticsConfig,
   resolveExtra?: (mastraContext: unknown) => RequestExtra | undefined,
 ): MastraTool => {
   if (typeof tool?.execute !== "function") {
@@ -81,7 +82,7 @@ const wrapOneTool = (
 export const wrapMastraToolsWithRecorder = (
   tools: MastraToolMap,
   recorder: AnalyticsRecorder,
-  config: McpAnalyticsConfig = {},
+  config: InternalMcpAnalyticsConfig = {},
   options: { resolveExtra?: MastraAdapterOptions["resolveExtra"] } = {},
 ): MastraToolMap => {
   const out: MastraToolMap = {};

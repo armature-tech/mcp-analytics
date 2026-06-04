@@ -13,6 +13,7 @@ import type {
 import { createAnalyticsRecorder } from "./recorder.js";
 import { decorateInputSchemaWithTelemetry } from "./schema.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
+import { isRecord } from "./utils.js";
 
 type WithAnalyticsContext = {
   config: McpAnalyticsConfig;
@@ -22,14 +23,120 @@ type WithAnalyticsContext = {
 const withAnalyticsStorage = new AsyncLocalStorage<WithAnalyticsContext>();
 let prototypePatchInstalled = false;
 
+// Mirrors the SDK's `isZodTypeLike`/`isZodRawShapeCompat` checks closely enough
+// to disambiguate the overloads of `server.tool(...)`: a raw shape is a plain
+// object whose values include at least one Zod schema, while a Zod schema
+// instance carries `_def` (v3) or `_zod` (v4).
+const isZodSchemaLike = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  return "_def" in value || "_zod" in value;
+};
+
+const isZodRawShapeLike = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  if (isZodSchemaLike(value)) return false;
+  if (Object.keys(value).length === 0) return true;
+  return Object.values(value).some(isZodSchemaLike);
+};
+
+type ParsedToolArgs = {
+  description?: string;
+  inputSchema?: unknown;
+  annotations?: unknown;
+  callback: ToolCallback;
+};
+
+// Mirrors @modelcontextprotocol/sdk/server/mcp.js `tool(name, ...rest)` argument
+// parsing so we can normalise every overload through our patched `registerTool`.
+const parseDeprecatedToolArgs = (rest: unknown[]): ParsedToolArgs => {
+  const args = [...rest];
+  let description: string | undefined;
+  let inputSchema: unknown;
+  let annotations: unknown;
+  if (typeof args[0] === "string") {
+    description = args.shift() as string;
+  }
+  if (args.length > 1) {
+    const firstArg = args[0];
+    if (isZodRawShapeLike(firstArg)) {
+      inputSchema = args.shift();
+      if (
+        args.length > 1 &&
+        isRecord(args[0]) &&
+        !isZodRawShapeLike(args[0])
+      ) {
+        annotations = args.shift();
+      }
+    } else if (isRecord(firstArg)) {
+      annotations = args.shift();
+    }
+  }
+  const callback = args[0] as ToolCallback;
+  return { description, inputSchema, annotations, callback };
+};
+
+const wrapCallbackWithAnalytics = (
+  name: string,
+  cb: ToolCallback,
+  originalHasInputSchema: boolean,
+  ctx: WithAnalyticsContext,
+): ToolCallback => {
+  const { recorder } = ctx;
+  return async (argsOrExtra: unknown, maybeExtra?: unknown) => {
+    const startedAtMs = Date.now();
+    const startedAt = new Date(startedAtMs).toISOString();
+    const requestId = randomUUID();
+    const extra = (originalHasInputSchema ? maybeExtra : argsOrExtra) as
+      | RequestExtra
+      | undefined;
+    const { args, telemetry } = recorder.extractTelemetry(argsOrExtra);
+
+    try {
+      const output = originalHasInputSchema
+        ? await cb(args, maybeExtra)
+        : await cb(maybeExtra ?? argsOrExtra);
+
+      await recorder.recordToolCall({
+        name,
+        args,
+        telemetry,
+        extra,
+        requestId,
+        startedAt,
+        durationMs: Date.now() - startedAtMs,
+        status: "ok",
+        result: output,
+      });
+
+      return output;
+    } catch (error) {
+      await recorder.recordToolCall({
+        name,
+        args,
+        telemetry,
+        extra,
+        requestId,
+        startedAt,
+        durationMs: Date.now() - startedAtMs,
+        status: "error",
+        error,
+      });
+
+      throw error;
+    }
+  };
+};
+
 const installPrototypePatchOnce = () => {
   if (prototypePatchInstalled) return;
   prototypePatchInstalled = true;
 
   const prototype = McpServer.prototype as unknown as {
     registerTool: RegisterTool;
+    tool: (this: McpServer, name: string, ...rest: unknown[]) => unknown;
   };
   const originalRegisterTool = prototype.registerTool;
+  const originalTool = prototype.tool;
 
   prototype.registerTool = function patchedRegisterTool(
     this: McpServer,
@@ -42,7 +149,7 @@ const installPrototypePatchOnce = () => {
       return originalRegisterTool.call(this, name, toolConfig, cb);
     }
 
-    const { config, recorder } = ctx;
+    const { config } = ctx;
     const originalHasInputSchema = toolConfig.inputSchema !== undefined;
     const instrumentedConfig = {
       ...toolConfig,
@@ -51,57 +158,44 @@ const installPrototypePatchOnce = () => {
         config,
       ),
     };
-
-    const wrappedCallback: ToolCallback = async (
-      argsOrExtra: unknown,
-      maybeExtra?: unknown,
-    ) => {
-      const startedAtMs = Date.now();
-      const startedAt = new Date(startedAtMs).toISOString();
-      const requestId = randomUUID();
-      const extra = (originalHasInputSchema ? maybeExtra : argsOrExtra) as RequestExtra | undefined;
-      const { args, telemetry } = recorder.extractTelemetry(argsOrExtra);
-
-      try {
-        const output = originalHasInputSchema
-          ? await cb(args, maybeExtra)
-          : await cb(maybeExtra ?? argsOrExtra);
-
-        await recorder.recordToolCall({
-          name,
-          args,
-          telemetry,
-          extra,
-          requestId,
-          startedAt,
-          durationMs: Date.now() - startedAtMs,
-          status: "ok",
-          result: output,
-        });
-
-        return output;
-      } catch (error) {
-        await recorder.recordToolCall({
-          name,
-          args,
-          telemetry,
-          extra,
-          requestId,
-          startedAt,
-          durationMs: Date.now() - startedAtMs,
-          status: "error",
-          error,
-        });
-
-        throw error;
-      }
-    };
+    const wrappedCallback = wrapCallbackWithAnalytics(
+      name,
+      cb,
+      originalHasInputSchema,
+      ctx,
+    );
 
     return originalRegisterTool.call(
       this,
       name,
       instrumentedConfig,
       wrappedCallback,
+    );
+  };
+
+  // PRIA and other older codebases still use the deprecated `server.tool(...)`
+  // overloads. Patch them too — we normalise into our patched `registerTool`
+  // so decoration and wrapping have a single code path.
+  prototype.tool = function patchedTool(
+    this: McpServer,
+    name: string,
+    ...rest: unknown[]
+  ) {
+    const ctx = withAnalyticsStorage.getStore();
+    if (!ctx) {
+      return originalTool.call(this, name, ...rest);
+    }
+
+    const { description, inputSchema, annotations, callback } =
+      parseDeprecatedToolArgs(rest);
+    const config: ToolConfig = {};
+    if (description !== undefined) config.description = description;
+    if (inputSchema !== undefined) config.inputSchema = inputSchema;
+    if (annotations !== undefined) config.annotations = annotations;
+    return (this as unknown as { registerTool: RegisterTool }).registerTool(
+      name,
+      config,
+      callback,
     );
   };
 };

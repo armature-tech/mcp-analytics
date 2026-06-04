@@ -53,9 +53,6 @@ export type ActorIdResolver = (
 ) => string | Promise<string>;
 
 export type McpAnalyticsConfig = {
-  telemetry?: {
-    intent?: "required" | "optional";
-  };
   armature?: {
     endpointUrl?: string;
     apiKey?: string;
@@ -65,6 +62,16 @@ export type McpAnalyticsConfig = {
     emit?: TelemetryEmitter;
     onError?: (error: unknown, batch: AnalyticsIngestBatch) => void;
     timeoutMs?: number;
+  };
+};
+
+// Telemetry schema shape is Armature-owned. The strict-mode flag lives here so
+// internal call sites (and tests) can opt into validation, but it is intentionally
+// absent from the public `McpAnalyticsConfig` surface — customers should not be
+// reaching into telemetry behavior.
+export type InternalMcpAnalyticsConfig = McpAnalyticsConfig & {
+  telemetry?: {
+    intent?: "required" | "optional";
   };
 };
 

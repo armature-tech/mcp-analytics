@@ -289,25 +289,22 @@ test("createMastraAnalytics exposes recorder + flush for shared use", async () =
   assert.equal(analytics.recorder.hasTool("echo"), false);
 });
 
-test("Mastra-wrapped tool with required-intent enforces telemetry.intent at parse time", () => {
+test("Mastra-wrapped tool accepts calls that omit telemetry entirely (Zod loose default)", () => {
   const tools: Record<string, MastraTool> = {
-    strict: {
-      id: "strict",
-      inputSchema: z.object({ id: z.string() }),
+    lookup_customer: {
+      id: "lookup_customer",
+      inputSchema: z.object({ customer_id: z.string() }),
       execute: async (input) => input,
     },
   };
-  const wrapped = wrapMastraTools(tools, {
-    telemetry: { intent: "required" },
-  });
-  const schema = wrapped.strict?.inputSchema as z.AnyZodObject;
+  const wrapped = wrapMastraTools(tools);
+  const schema = wrapped.lookup_customer?.inputSchema as z.AnyZodObject;
 
-  assert.throws(
-    () => schema.parse({ id: "x" }),
-    /telemetry/,
-  );
-  const ok = schema.parse({ id: "x", telemetry: { intent: "test" } });
-  assert.deepEqual(ok, { id: "x", telemetry: { intent: "test" } });
+  // Without the `.optional()` fix the parent ZodObject treated `telemetry` as
+  // required and this parse threw, breaking every customer call that did not
+  // include the (optional) telemetry block.
+  const parsed = schema.parse({ customer_id: "cus_1" });
+  assert.deepEqual(parsed, { customer_id: "cus_1" });
 });
 
 // Structural simulation of Mastra's tool surface. We don't import @mastra/core
@@ -408,20 +405,19 @@ test("wrapMastraTools decorates a zod/v4 strict object inputSchema without mixin
   assert.equal(toolCall?.metadata.intent, "look up account");
 });
 
-test("wrapMastraTools with required-intent enforces telemetry.intent on a zod/v4 inputSchema", () => {
+test("Mastra-wrapped zod/v4 tool accepts calls that omit telemetry entirely (loose default)", () => {
   const tools: Record<string, MastraTool> = {
-    strict_v4: {
-      id: "strict_v4",
+    lookup_v4: {
+      id: "lookup_v4",
       inputSchema: zv4.object({ id: zv4.string() }),
       execute: async (input) => input,
     },
   };
-  const wrapped = wrapMastraTools(tools, { telemetry: { intent: "required" } });
-  const schema = wrapped.strict_v4?.inputSchema as zv4.ZodObject<zv4.ZodRawShape>;
+  const wrapped = wrapMastraTools(tools);
+  const schema = wrapped.lookup_v4?.inputSchema as zv4.ZodObject<zv4.ZodRawShape>;
 
-  assert.throws(() => schema.parse({ id: "x" }), /telemetry/);
-  const ok = schema.parse({ id: "x", telemetry: { intent: "demo" } });
-  assert.deepEqual(ok, { id: "x", telemetry: { intent: "demo" } });
+  const parsed = schema.parse({ id: "x" });
+  assert.deepEqual(parsed, { id: "x" });
 });
 
 test("nudged JSON Schema also flows through wrapMastraTools for tools using JSON Schema inputSchema", async () => {

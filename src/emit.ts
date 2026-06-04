@@ -6,9 +6,6 @@ import type {
 import { headerValue, readEnv } from "./utils.js";
 
 export const defaultMcpAnalyticsConfig = {
-  telemetry: {
-    intent: "optional",
-  },
   armature: {
     endpointUrl: "https://app.armature.tech/api/mcp-analytics/ingest",
     enabled: true,

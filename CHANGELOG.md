@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.0
+
+Surfaced and fixed three regressions that prevented `createMcpAnalyticsServer(...)` from instrumenting servers that use the deprecated `server.tool(...)` overload, plus an API cleanup so customers cannot reach into telemetry behavior.
+
+### Instrument the deprecated `server.tool(...)` overload
+
+Older codebases and hand-rolled servers call `server.tool(name, paramsSchema, cb)` instead of the newer `registerTool(...)`. The previous prototype patch only wrapped `registerTool`, so the SDK silently appeared installed but never decorated those tools or recorded their calls. The patch now also rewrites `McpServer.prototype.tool`: every overload is parsed, normalised into a config object, and routed through the same decoration + recording path as `registerTool`. A new end-to-end test in `tests/with-mcp-analytics.test.ts` covers this shape via a real MCP transport.
+
+### Telemetry block is genuinely optional on Zod schemas
+
+The Zod path extended the parent object with a non-`.optional()` telemetry schema, so even though the inner fields were optional the `telemetry` key itself was required — every call that omitted the block failed parse at the MCP input boundary. `createTelemetryInputSchema` (v3 and v4) now wraps the loose schema with `.optional()` so customers can omit it entirely. Matches the existing JSON-schema-side behavior. Strict mode (`intent: "required"`) is unchanged.
+
+### `@modelcontextprotocol/sdk` is now a peer dependency
+
+Under pnpm the SDK previously kept its own nested copy of `@modelcontextprotocol/sdk`, so patching `McpServer.prototype` patched the wrong class — the customer's `McpServer` instances were untouched. Moved the SDK from `dependencies` to `peerDependencies` (with a matching `devDependencies` entry for local builds and tests). Customers must already have `@modelcontextprotocol/sdk` installed (the install instructions in the README already say so), so this is not a new requirement — but it guarantees the patch lands on the same class the customer constructs.
+
+### Hide `telemetry` from `McpAnalyticsConfig`
+
+Telemetry schema shape is Armature-owned. Removed the `telemetry` field from the public `McpAnalyticsConfig` type and from the default config; customers only set operational config (`armature.delivery`, `actorId`, `timeoutMs`, etc.). The strict-mode flag survives internally on a non-exported `InternalMcpAnalyticsConfig` so the SDK can still opt into validation; lower-level schema utilities (`decorateInputSchemaWithTelemetry`, `createTelemetryInputSchema`, `createTelemetryJsonSchema`) still accept it.
+
+### Breaking changes
+
+- `McpAnalyticsConfig.telemetry` is gone from the public type. Any consumer that was passing `telemetry: { intent: "required" }` to `createMcpAnalyticsServer`, `withMcpAnalytics`, `createAnalyticsRecorder`, `wrapMastraTools`, or `createMastraAnalytics` should drop that field.
+- `@modelcontextprotocol/sdk` moved to `peerDependencies`. Installs that did not already list the SDK explicitly will need to add it.
+
 ## 0.4.3
 
 ### Mastra adapter: decorate zod/v4 inputSchemas with a v4 telemetry block
