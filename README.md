@@ -11,8 +11,12 @@ It also exposes recorder primitives for dispatcher-style MCP servers that hand-r
 ## Install
 
 ```sh
-npm install @armature-tech/mcp-analytics @modelcontextprotocol/sdk zod
+npx skills add armature-tech/mcp-analytics --global && npm install @armature-tech/mcp-analytics @modelcontextprotocol/sdk zod
 ```
+
+Then ask your coding agent (Claude Code, Cursor, Codex, Gemini, …): *"install Armature analytics on this MCP server"*. The `install-mcp-analytics` skill ([`SKILL.md`](SKILL.md)) detects which of the four integration shapes fits your repo (registry-style `McpServer`, drop-in factory, dispatcher, or Mastra `MCPServer`), makes the edits, and verifies the wiring.
+
+Not using an agent? Just run the `npm install` part and follow the [Quick start](#quick-start) below. The `skills` CLI in the first half of the command is the open [`vercel-labs/skills`](https://github.com/vercel-labs/skills) installer — it copies `SKILL.md` into your agent's skill directory.
 
 ## Quick start
 
