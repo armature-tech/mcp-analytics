@@ -186,6 +186,111 @@ test("native registerTool path captures clientInfo end-to-end through InMemoryTr
   }
 });
 
+test("stateless Streamable HTTP: initialize clientInfo is keyed by the Mcp-Session-Id header", async () => {
+  // Repro for the Vercel/PRIA stateless case: `sessionIdGenerator` is disabled,
+  // so `transport.sessionId` is undefined and the client's identity only arrives
+  // via the `Mcp-Session-Id` request header on initialize. The clientInfo must
+  // be cached under that header session id so the later tools/call (normalized
+  // to the same header) resolves the client name instead of "Unknown".
+  installClientInfoCapture();
+  __clearClientInfoCache();
+
+  const sessionId = "sdk-lab-v062-raw-a";
+  const [st, ct] = InMemoryTransport.createLinkedPair();
+  // Stateless: leave st.sessionId undefined.
+
+  const { batches, emit } = collectBatches();
+  const { result: server, recorder } = withMcpAnalytics(
+    { armature: { delivery: "await", actorId: "stateless-actor", emit } },
+    () => {
+      const s = new McpServer({ name: "stateless-server", version: "0.0.1" });
+      s.registerTool(
+        "ping",
+        { description: "ping", inputSchema: {} },
+        async () => ({ content: [{ type: "text" as const, text: "pong" }] }),
+      );
+      return s;
+    },
+  );
+
+  await server.connect(st);
+  // Simulate what Streamable HTTP does: attach the incoming request headers
+  // (including Mcp-Session-Id) to the per-request `extra`. InMemoryTransport
+  // otherwise only forwards authInfo, so we layer headers on here.
+  const transportWithHandler = st as unknown as {
+    onmessage?: (message: unknown, extra?: unknown) => void;
+  };
+  const realOnMessage = transportWithHandler.onmessage?.bind(st);
+  transportWithHandler.onmessage = (message, extra) =>
+    realOnMessage?.(message, {
+      ...(extra as Record<string, unknown> | undefined),
+      requestInfo: { headers: { "mcp-session-id": sessionId } },
+    });
+
+  const client = new Client({ name: "codex", version: "0.1.0" });
+  await client.connect(ct);
+
+  try {
+    // Capture happened at initialize, keyed by the header session id.
+    assert.equal(getClientInfoForSessionId(sessionId)?.name, "codex");
+
+    await client.callTool({ name: "ping", arguments: {} });
+
+    const events = batches.flatMap((b) => b.events);
+    const sessionInit = events.find((e) => e.kind === "session_init");
+    assert.ok(sessionInit, "tools/call should trigger a session_init batch");
+    assert.equal(sessionInit?.session_id_hint, sessionId);
+    assert.equal(sessionInit?.metadata.client_name, "codex");
+    assert.equal(sessionInit?.metadata.client_version, "0.1.0");
+  } finally {
+    await client.close();
+    await server.close();
+    await recorder.flush();
+  }
+});
+
+test("stateless capture keys clientInfo by header even when transport.sessionId is set and differs", async () => {
+  // Defensive: when both a transport sessionId and a header sessionId exist,
+  // cache under both so the tool-call lookup hits regardless of which one the
+  // tool-call path normalizes to.
+  installClientInfoCapture();
+  __clearClientInfoCache();
+
+  const transportSessionId = "transport-sid";
+  const headerSessionId = "header-sid";
+  const [st, ct] = InMemoryTransport.createLinkedPair();
+  (st as { sessionId?: string }).sessionId = transportSessionId;
+
+  const server = new McpServer({ name: "dual-key-server", version: "0.0.1" });
+  server.registerTool(
+    "noop",
+    { description: "noop", inputSchema: { x: z.string().optional() } },
+    async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+  );
+
+  await server.connect(st);
+  const transportWithHandler = st as unknown as {
+    onmessage?: (message: unknown, extra?: unknown) => void;
+  };
+  const realOnMessage = transportWithHandler.onmessage?.bind(st);
+  transportWithHandler.onmessage = (message, extra) =>
+    realOnMessage?.(message, {
+      ...(extra as Record<string, unknown> | undefined),
+      requestInfo: { headers: { "mcp-session-id": headerSessionId } },
+    });
+
+  const client = new Client({ name: "Claude Desktop", version: "1.2.3" });
+  await client.connect(ct);
+
+  try {
+    assert.equal(getClientInfoForSessionId(transportSessionId)?.name, "Claude Desktop");
+    assert.equal(getClientInfoForSessionId(headerSessionId)?.name, "Claude Desktop");
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test("explicit event.clientInfo wins over the cache", async () => {
   installClientInfoCapture();
   __clearClientInfoCache();

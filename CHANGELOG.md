@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.3
+
+### Capture `initialize` clientInfo by the `Mcp-Session-Id` header for stateless Streamable HTTP
+
+For stateless / serverless Streamable HTTP deployments (e.g. Vercel) the dashboard still showed `Client: Unknown` when the client's identity was only present in `initialize.params.clientInfo`. In stateless mode `sessionIdGenerator` is disabled, so `transport.sessionId` is undefined; the client instead carries its session via the `Mcp-Session-Id` request header. The client-info cache only keyed `clientInfo` by `transport.sessionId ?? params._meta?.sessionId`, so the initialize payload was never cached under the header session id — and the later `tools/call`, normalized to that header, found nothing, leaving `metadata.client_name` null.
+
+The capture patch now wraps `Server.prototype._onrequest` (the request dispatcher) instead of `Server.prototype._oninitialize`. The SDK registers the initialize handler as `request => this._oninitialize(request)`, dropping the per-request `extra`, so `_oninitialize` never sees request headers; `_onrequest` receives both the `initialize` payload (with `clientInfo`) and `extra.requestInfo.headers` (with `Mcp-Session-Id`). The clientInfo is now cached under **every** observable session-id key — `transport.sessionId`, the `Mcp-Session-Id` header, and `params._meta.sessionId` — so the tool-call lookup hits regardless of which one that request resolves to. Header lookup is case-insensitive (via the shared `headerValue` helper) and capture remains best-effort: any failure is swallowed and never breaks the handshake.
+
+Result: stateless HTTP with `Mcp-Session-Id` + initialize `clientInfo.name` now renders the real client name, with no need for the non-standard `x-mcp-client` header. The 0.6.2 event-id collision guarantee is unaffected. Added regression tests simulating stateless Streamable HTTP (header-only session identity) and the dual-key (transport + header) case.
+
 ## 0.6.2
 
 ### Fix `event_id` collisions seeded from the MCP JSON-RPC request id

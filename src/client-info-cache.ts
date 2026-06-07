@@ -1,10 +1,12 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import type { McpClientInfo } from "./types.js";
+import type { HeaderBag, McpClientInfo } from "./types.js";
+import { headerValue, isRecord } from "./utils.js";
 
-// In-process map keyed by transport sessionId. Populated by the patched
-// `Server.prototype._oninitialize` and read by the recorder at tool-call time.
-// Same instance the customer constructs, because `@modelcontextprotocol/sdk`
-// is a peer dependency.
+// In-process map keyed by session id (transport sessionId and/or the
+// `Mcp-Session-Id` request header). Populated by the patched
+// `Server.prototype._onrequest` on `initialize` and read by the recorder at
+// tool-call time. Same instance the customer constructs, because
+// `@modelcontextprotocol/sdk` is a peer dependency.
 //
 // Bounded by `MAX_CACHE_ENTRIES` with FIFO eviction (Map iteration order is
 // insertion order in JS, so the first key is the oldest). MCP `initialize`
@@ -27,8 +29,10 @@ const setCachedClientInfo = (sessionId: string, info: McpClientInfo) => {
 
 let initializePatchInstalled = false;
 
+const HEADER_SESSION_ID = "mcp-session-id";
+
 type ServerInternals = {
-  _oninitialize?: (request: unknown) => Promise<unknown>;
+  _onrequest?: (request: unknown, extra?: unknown) => unknown;
   transport?: { sessionId?: string };
 };
 
@@ -47,52 +51,89 @@ const extractInitializeParams = (request: unknown): InitializeRequestParams => {
     : {};
 };
 
-// `Server.prototype._oninitialize` is a private method that runs on every
-// `initialize` request, right before the handshake response is sent. Wrapping
-// it lets us snapshot `clientInfo` and key it by `transport.sessionId` so the
-// tool-call path can recover the client name even when the framework around
-// the SDK (e.g. Mastra's `MCPServer`) never surfaces the underlying `Server`
-// instance to the tool handler.
+const headersFromExtra = (extra: unknown): HeaderBag | undefined => {
+  if (!isRecord(extra)) return undefined;
+  const requestInfo = (extra as { requestInfo?: unknown }).requestInfo;
+  if (!isRecord(requestInfo)) return undefined;
+  return (requestInfo as { headers?: HeaderBag }).headers;
+};
+
+// Snapshot `clientInfo` from an `initialize` request and cache it under every
+// session-id key we can observe. Stateless Streamable HTTP (Vercel et al.)
+// disables `sessionIdGenerator`, so `transport.sessionId` is undefined and the
+// client's identity instead arrives via the `Mcp-Session-Id` request header —
+// the same value the tool-call path later normalizes to. Keying by transport
+// id AND header id AND `_meta.sessionId` means the tool-call lookup hits
+// regardless of which one that request resolves to.
+const captureClientInfoFromInitialize = (
+  server: ServerInternals,
+  request: unknown,
+  extra: unknown,
+): void => {
+  const params = extractInitializeParams(request);
+  const info = params.clientInfo;
+  const name = typeof info?.name === "string" ? info.name.trim() : "";
+  if (name.length === 0) return;
+
+  const headerSessionId =
+    headerValue(headersFromExtra(extra), HEADER_SESSION_ID) ?? undefined;
+
+  const sessionIds = new Set<string>();
+  if (server.transport?.sessionId) sessionIds.add(server.transport.sessionId);
+  if (headerSessionId) sessionIds.add(headerSessionId);
+  if (params._meta?.sessionId) sessionIds.add(params._meta.sessionId);
+  if (sessionIds.size === 0) return;
+
+  const clientInfo: McpClientInfo = {
+    name,
+    version: typeof info?.version === "string" ? info.version : undefined,
+    protocolVersion:
+      typeof params.protocolVersion === "string"
+        ? params.protocolVersion
+        : undefined,
+    capabilities:
+      typeof params.capabilities === "object" && params.capabilities !== null
+        ? params.capabilities
+        : null,
+  };
+  for (const sessionId of sessionIds) {
+    setCachedClientInfo(sessionId, clientInfo);
+  }
+};
+
+// `Server.prototype._onrequest` (inherited from `Protocol`) is the private
+// dispatcher invoked for every inbound JSON-RPC request, and unlike the
+// `initialize` handler — which the SDK registers as `request =>
+// this._oninitialize(request)`, dropping the second argument — it receives both
+// the request AND the per-request `extra` carrying `requestInfo.headers`. That
+// makes it the only frame where the `initialize` payload's `clientInfo` and the
+// `Mcp-Session-Id` header are in scope together, which we need for stateless
+// HTTP. Wrapping it here also keeps the capture working when the framework
+// around the SDK (e.g. Mastra's `MCPServer`) never surfaces the underlying
+// `Server` instance to the tool handler.
 //
 // Defensive: if the SDK ever renames the method, the patch is a no-op and the
 // dashboard regresses to today's behaviour rather than breaking the server.
 export const installClientInfoCapture = (): void => {
   if (initializePatchInstalled) return;
   const proto = Server.prototype as unknown as ServerInternals;
-  if (typeof proto._oninitialize !== "function") return;
+  if (typeof proto._onrequest !== "function") return;
   initializePatchInstalled = true;
 
-  const original = proto._oninitialize;
-  proto._oninitialize = async function patchedOnInitialize(
+  const original = proto._onrequest;
+  proto._onrequest = function patchedOnRequest(
     this: ServerInternals,
     request: unknown,
+    extra?: unknown,
   ) {
-    const result = await original.call(this, request);
     try {
-      const params = extractInitializeParams(request);
-      const sessionId =
-        this.transport?.sessionId ?? params._meta?.sessionId ?? undefined;
-      const info = params.clientInfo;
-      const name = typeof info?.name === "string" ? info.name.trim() : "";
-      if (sessionId && name.length > 0) {
-        setCachedClientInfo(sessionId, {
-          name,
-          version:
-            typeof info?.version === "string" ? info.version : undefined,
-          protocolVersion:
-            typeof params.protocolVersion === "string"
-              ? params.protocolVersion
-              : undefined,
-          capabilities:
-            typeof params.capabilities === "object" && params.capabilities !== null
-              ? params.capabilities
-              : null,
-        });
+      if (isRecord(request) && request.method === "initialize") {
+        captureClientInfoFromInitialize(this, request, extra);
       }
     } catch {
-      // Capture is best-effort; never break the handshake.
+      // Capture is best-effort; never break request handling.
     }
-    return result;
+    return original.call(this, request, extra);
   };
 };
 
