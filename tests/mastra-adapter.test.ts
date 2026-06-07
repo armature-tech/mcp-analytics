@@ -799,3 +799,40 @@ test("nudged JSON Schema also flows through wrapMastraTools for tools using JSON
   const toolCall = events.find((event) => event.kind === "tool_call");
   assert.equal(toolCall?.metadata.intent, "lookup via JSON schema");
 });
+
+test("wrapped Mastra tools sharing a JSON-RPC requestId emit distinct event_ids", async () => {
+  // Regression: the Mastra adapter previously forwarded `extra.requestId` (the
+  // MCP JSON-RPC counter) as the analytics request id, so two calls that landed
+  // on the same counter value collided on `event_id` and the second was deduped
+  // away at ingest. The adapter must let the recorder mint a fresh per-call id.
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = makeRecorder(batches);
+
+  const tools: Record<string, MastraTool> = {
+    echo: {
+      id: "echo",
+      inputSchema: z.object({ msg: z.string() }),
+      execute: async (input) => input,
+    },
+  };
+
+  const wrapped = wrapMastraToolsWithRecorder(tools, recorder);
+  const callWith = (msg: string) =>
+    wrapped.echo?.execute?.(
+      { msg },
+      { mcp: { extra: { sessionId: "session-1", requestId: 2 } } },
+    );
+
+  await callWith("first");
+  await callWith("second");
+
+  const toolCalls = batches
+    .flatMap((batch) => batch.events)
+    .filter((event) => event.kind === "tool_call");
+  assert.equal(toolCalls.length, 2);
+  assert.notEqual(
+    toolCalls[0]?.event_id,
+    toolCalls[1]?.event_id,
+    "Mastra event_id must not collide when extra.requestId repeats",
+  );
+});

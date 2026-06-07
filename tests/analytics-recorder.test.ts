@@ -747,6 +747,113 @@ test("instrumentToolCall with header-only sessionId + clientInfo emits harness f
   assert.equal(sessionInit?.metadata.user_agent, "Claude/Test");
 });
 
+test("two tool calls sharing the same JSON-RPC requestId get distinct event_ids", async () => {
+  // Regression: the MCP JSON-RPC request id (`extra.requestId`) is a per-client
+  // counter that restarts on reconnect / across stateless gateway instances, so
+  // two unrelated tool calls routinely arrive with the same `extra.requestId`.
+  // It must NOT seed `event_id`, or ingest dedupes the second call away and
+  // undercounts events. Same actor + same `extra.requestId` => distinct ids.
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: "stable-actor",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  const callWith = (customer: string) =>
+    recorder.instrumentToolCall(
+      {
+        name: "lookup_customer",
+        args: { customer_id: customer },
+        // Identical JSON-RPC id on both calls — the collision trigger.
+        extra: { requestId: 2, sessionId: "session-xyz" },
+      },
+      async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+    );
+
+  await callWith("cus_1");
+  await callWith("cus_2");
+
+  const toolCalls = batches
+    .flatMap((batch) => batch.events)
+    .filter((event) => event.kind === "tool_call");
+
+  assert.equal(toolCalls.length, 2);
+  assert.notEqual(
+    toolCalls[0]?.event_id,
+    toolCalls[1]?.event_id,
+    "event_id must not collide when extra.requestId repeats",
+  );
+});
+
+test("nested tool calls that forward the handler context get distinct event_ids", async () => {
+  // Regression: the handler context built for a registered tool must not carry
+  // the MCP JSON-RPC request id. A handler that fans out to a nested tool and
+  // forwards its received context would otherwise seed every nested call's
+  // event_id with the same JSON-RPC id, re-introducing collisions for nested
+  // invocations even after the top-level paths were fixed.
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: "nested-actor",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  const inner = recorder.tool<{ n: number }>(
+    {
+      name: "inner",
+      inputSchema: { n: z.number() },
+    },
+    async (args) => args,
+  );
+
+  recorder.tool(
+    { name: "outer", inputSchema: {} },
+    async (_args, context) => {
+      // A real handler fanning out to a nested tool, forwarding its context.
+      await inner({ n: 1 }, context);
+      await inner({ n: 2 }, context);
+      return { ok: true };
+    },
+  );
+
+  const server = recorder.createMcpServer({ name: "nested", version: "0.0.1" });
+  const client = new Client({ name: "nested-client", version: "0.0.1" });
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+
+  try {
+    await client.callTool({ name: "outer", arguments: {} });
+
+    const innerCalls = batches
+      .flatMap((batch) => batch.events)
+      .filter(
+        (event) =>
+          event.kind === "tool_call" && event.metadata.tool_name === "inner",
+      );
+    assert.equal(innerCalls.length, 2);
+    assert.notEqual(
+      innerCalls[0]?.event_id,
+      innerCalls[1]?.event_id,
+      "nested calls forwarding the handler context must not collide on event_id",
+    );
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test("attaching the same recorder to two McpServers throws", () => {
   const recorder = createAnalyticsRecorder({
     armature: { actorId: "x" },

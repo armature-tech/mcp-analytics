@@ -248,13 +248,16 @@ export const normalizeSessionId = (
   return trimOrUndefined(headerValue(extra?.requestInfo?.headers, "mcp-session-id"));
 };
 
-export const normalizeRequestId = (
-  eventRequestId: string | undefined,
-  extra: RequestExtra | undefined,
-) => {
-  return eventRequestId ?? (
-    extra?.requestId === undefined ? randomUUID() : String(extra.requestId)
-  );
+// The analytics request id seeds `event_id` (see `buildEventId`), so it MUST be
+// unique per tool-call invocation. We intentionally do NOT derive it from the
+// MCP JSON-RPC request id (`extra.requestId`): that is an in-memory per-client
+// counter (0, 1, 2, …) that restarts on reconnect, across stateless gateway
+// instances, etc., so two unrelated tool calls routinely share `extra.requestId`
+// and would collide on `event_id` — making ingest dedupe the second call away.
+// An explicit caller-supplied id still wins (it's a deliberate idempotency key);
+// otherwise we mint a fresh uuid, matching the prototype-patch path in server.ts.
+export const normalizeRequestId = (eventRequestId: string | undefined) => {
+  return eventRequestId ?? randomUUID();
 };
 
 export const normalizeStartedAt = ({

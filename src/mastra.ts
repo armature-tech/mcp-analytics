@@ -173,8 +173,11 @@ const wrapOneTool = (
         ctx: mastraContext,
         extra,
         sessionId: extra?.sessionId,
-        requestId:
-          extra?.requestId === undefined ? undefined : String(extra.requestId),
+        // Deliberately NOT forwarding `extra.requestId` (the MCP JSON-RPC id):
+        // it's a per-client counter that resets on reconnect, so reusing it as
+        // the event-id seed causes cross-session `event_id` collisions and lost
+        // events. Let the recorder mint a fresh per-call id (see
+        // `normalizeRequestId`). The JSON-RPC id stays available via `extra`.
         authInfo: extra?.authInfo,
         headers: extra?.requestInfo?.headers,
       },

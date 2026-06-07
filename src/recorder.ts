@@ -172,7 +172,7 @@ export const createAnalyticsRecorder = (
       durationMs,
       finishedAtMs,
     });
-    const requestId = normalizeRequestId(event.requestId, event.extra);
+    const requestId = normalizeRequestId(event.requestId);
     const sessionId = normalizeSessionId(event.sessionId, event.extra);
     const errorMessage = event.error === undefined
       ? undefined
@@ -278,7 +278,12 @@ export const createAnalyticsRecorder = (
   ): ToolHandlerContext => ({
     extra,
     sessionId: extra?.sessionId,
-    requestId: extra?.requestId === undefined ? undefined : String(extra.requestId),
+    // Deliberately NOT surfacing `extra.requestId` (the MCP JSON-RPC id) as
+    // `context.requestId`: `dispatch` spreads the handler context into
+    // `instrumentToolCall`, so a handler that forwards its context into a nested
+    // tool call would seed that call's `event_id` with the JSON-RPC id — a
+    // per-client counter that resets on reconnect — re-introducing the exact
+    // collisions this fix removes. The id stays reachable via `context.extra`.
     authInfo: extra?.authInfo,
     headers: extra?.requestInfo?.headers,
     ctx: extra,

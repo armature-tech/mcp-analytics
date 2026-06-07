@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.2
+
+### Fix `event_id` collisions seeded from the MCP JSON-RPC request id
+
+`event_id` for a tool call was derived as `sha256(actorId + " tool_call " + requestId)`, and in two of the three instrumentation paths `requestId` fell back to the MCP JSON-RPC request id (`extra.requestId`):
+
+- `instrumentMcpServerTools` / `attachToMcpServer` / `recorder.tool` — the registered callback set no request id, so `normalizeRequestId` used `String(extra.requestId)`.
+- the Mastra adapter (`wrapMastraTools`) — it explicitly forwarded `String(extra.requestId)`.
+
+The JSON-RPC request id is an in-memory per-client counter (`0, 1, 2, …`) that restarts whenever a client reconnects, restarts, or a stateless gateway/client instance is recreated. Two unrelated tool calls that resolve to the same actor (commonly `"anonymous"` or a shared auth/client id) and the same counter value therefore produced an identical `event_id`. Ingest dedupes by `event_id`, so the second call was dropped — undercounting events, and in some cases preventing a second session from being counted when the duplicate short-circuited before session persistence. (Confirmable in Datadog via `@event:mcp_analytics_ingest @duplicate_count:>0`.)
+
+`normalizeRequestId` no longer derives the analytics request id from `extra.requestId`. An explicit caller-supplied id still wins (a deliberate idempotency key); otherwise a fresh per-call uuid is minted — matching what the `withMcpAnalytics` / `createMcpAnalyticsServer` prototype-patch path already did. The Mastra adapter stops forwarding `extra.requestId` for this purpose; the JSON-RPC id remains available in `extra` for everything else. `event_id` is still computed once at event-build time, so HTTP-delivery retries of the same batch dedupe correctly.
+
+The handler context built for registered tools (`buildHandlerContext`) also no longer surfaces `extra.requestId` as `context.requestId`: `dispatch` spreads that context into `instrumentToolCall`, so a handler that fanned out to a nested tool while forwarding its context would otherwise re-seed the nested call's `event_id` with the JSON-RPC id. The MCP request id stays reachable via `context.extra.requestId`.
+
+Regression tests assert that two tool calls sharing the same `extra.requestId` (same actor/session) emit distinct `event_id`s — through the recorder funnel, the Mastra adapter, and nested tool calls that forward the handler context.
+
 ## 0.6.1
 
 ### Mastra adapter: drop the index signature from `MastraTool` so real `Tool<...>` class instances assign without a cast
