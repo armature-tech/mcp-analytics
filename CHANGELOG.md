@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.4
+
+### Bound the per-recorder `session_init` dedup set; make `session_init` event ids stable per session
+
+Each recorder kept a `sessionInitKeys` set of `${actorId}:${sessionId}` pairs so it emits at most one `session_init` per session. That set was **never evicted** — the exact unbounded-growth problem its sibling, the client-info cache, was written to avoid (MCP fires no reliable "session-closed" signal). On a long-running server with high session churn — many distinct `Mcp-Session-Id`s, e.g. the multi-client / stateless-gateway shape from #37 — it leaked memory indefinitely.
+
+The set is now bounded at 10k entries with FIFO eviction, mirroring the client-info cache (a shared `createBoundedKeySet` helper). Eviction is made safe by a second change: `session_init`'s `event_id` is now derived **stably from `(actorId, sessionId)`** instead of from the triggering tool call's (random) `event_id`. A session has exactly one `session_init`, so this is the correct key — and it means a `session_init` re-emitted after eviction (or after a process restart / serverless cold start that re-handles the same session) collapses to the same id at ingest rather than double-counting. `kind` is already part of the event-id hash, so there is no collision with `tool_call` ids.
+
+No public API change. The 0.6.2 tool-call collision guarantee and the #37 stateless client-name fix are both unaffected. Added regression tests: `createBoundedKeySet` FIFO eviction, `session_init` id stability per `(actorId, sessionId)`, and that a fresh recorder re-emits the same `session_init` id for the same session.
+
 ## 0.6.3
 
 ### Capture `initialize` clientInfo by the `Mcp-Session-Id` header for stateless Streamable HTTP

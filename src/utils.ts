@@ -31,6 +31,36 @@ export const sha256Hex = (value: string) => {
   return createHash("sha256").update(value).digest("hex");
 };
 
+// Minimal `has`/`add` surface so a plain `Set<string>` is structurally
+// assignable (tests pass `new Set()` directly).
+export type BoundedKeySet = {
+  has: (key: string) => boolean;
+  add: (key: string) => void;
+};
+
+// A `Set<string>` capped at `maxEntries` with FIFO eviction (Map/Set iteration
+// order is insertion order in JS, so the first key is the oldest). MCP fires no
+// reliable "session-closed" signal, so an unbounded set of session keys would
+// leak forever on a long-running server with high session churn — the same
+// reasoning behind the client-info cache's bound. Eviction is safe because the
+// only consumers (`session_init` de-dup) now derive a stable `event_id` per
+// (actorId, sessionId), so a re-emitted `session_init` after eviction collapses
+// to the same id at ingest rather than double-counting.
+export const createBoundedKeySet = (maxEntries: number): BoundedKeySet => {
+  const keys = new Set<string>();
+  return {
+    has: (key) => keys.has(key),
+    add: (key) => {
+      if (keys.has(key)) return;
+      if (keys.size >= maxEntries) {
+        const oldest = keys.values().next().value;
+        if (oldest !== undefined) keys.delete(oldest);
+      }
+      keys.add(key);
+    },
+  };
+};
+
 export const stringifyPreview = (value: unknown) => {
   if (value === undefined) return "undefined";
   try {

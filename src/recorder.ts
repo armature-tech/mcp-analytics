@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type {
   ActorIdResolverInput,
@@ -35,7 +34,7 @@ import {
   INTENT_DESCRIPTION,
   TELEMETRY_PROPERTY_DESCRIPTION,
 } from "./schema.js";
-import { isJsonObjectSchema, isRecord } from "./utils.js";
+import { createBoundedKeySet, isJsonObjectSchema, isRecord } from "./utils.js";
 import type { JsonObjectSchema } from "./types.js";
 import {
   getClientInfoForSessionId,
@@ -92,7 +91,13 @@ export const createAnalyticsRecorder = (
   config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
 ): AnalyticsRecorder => {
   const { emitBatch, flush } = createFlushableEmitter(config);
-  const sessionInitKeys = new Set<string>();
+  // Tracks which (actorId, sessionId) pairs have already emitted a session_init,
+  // so we emit it at most once per session. Bounded with FIFO eviction: MCP
+  // gives no reliable session-closed signal, so an unbounded set would leak on
+  // long-running servers with high session churn. Eviction is safe because the
+  // session_init event_id is now stable per (actorId, sessionId), so a re-emit
+  // after eviction collapses to the same id at ingest. 10k × ~60 bytes ≈ 600KB.
+  const sessionInitKeys = createBoundedKeySet(10_000);
 
   // Patch the SDK's Server.prototype the first time any recorder is created
   // so that the very next `initialize` handshake feeds the per-session client
@@ -144,7 +149,6 @@ export const createAnalyticsRecorder = (
     const batch = buildSessionInitBatch({
       actorId: context.actorId,
       sessionId,
-      requestId: event.requestId ?? randomUUID(),
       startedAt,
       extra: event.extra,
       sessionInitKeys,

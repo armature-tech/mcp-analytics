@@ -12,6 +12,7 @@ import {
   MAX_PREVIEW_BYTES,
   MAX_SOURCE_BYTES,
   SCHEMA_VERSION,
+  type BoundedKeySet,
   headerValue,
   isRecord,
   sha256Hex,
@@ -124,20 +125,24 @@ export const buildToolCallEvent = ({
 export const buildSessionInitEvent = ({
   actorId,
   sessionId,
-  requestId,
   startedAt,
   extra,
   clientInfo,
 }: {
   actorId: string;
   sessionId: string;
-  requestId: string;
   startedAt: string;
   extra?: RequestExtra;
   clientInfo?: McpClientInfo;
 }): AnalyticsIngestEvent => {
   return {
-    event_id: buildEventId({ actorId, requestId, kind: "session_init" }),
+    // Stable per (actorId, sessionId): a session has exactly one session_init,
+    // so seeding the id with the sessionId lets ingest de-dup it on its own —
+    // independent of the in-memory `sessionInitKeys` set (which is now bounded
+    // and may evict) and idempotent across process restarts / serverless cold
+    // starts that re-handle the same session. `kind` is already in the hash, so
+    // there's no collision with tool_call ids that reuse the same seed.
+    event_id: buildEventId({ actorId, requestId: sessionId, kind: "session_init" }),
     kind: "session_init",
     actor_id: actorId,
     session_id_hint: sessionId,
@@ -179,7 +184,7 @@ export const buildBatch = ({
   extra?: RequestExtra;
   actorId: string;
   startedAt: string;
-  sessionInitKeys: Set<string>;
+  sessionInitKeys: BoundedKeySet;
   clientInfo?: McpClientInfo;
 }): AnalyticsIngestBatch => {
   const events: AnalyticsIngestEvent[] = [];
@@ -191,7 +196,6 @@ export const buildBatch = ({
       events.push(buildSessionInitEvent({
         actorId,
         sessionId: extra.sessionId,
-        requestId: `${event.event_id}:session_init`,
         startedAt,
         extra,
         clientInfo,
@@ -206,7 +210,6 @@ export const buildBatch = ({
 export const buildSessionInitBatch = ({
   actorId,
   sessionId,
-  requestId,
   startedAt,
   extra,
   sessionInitKeys,
@@ -214,10 +217,9 @@ export const buildSessionInitBatch = ({
 }: {
   actorId: string;
   sessionId: string;
-  requestId: string;
   startedAt: string;
   extra?: RequestExtra;
-  sessionInitKeys: Set<string>;
+  sessionInitKeys: BoundedKeySet;
   clientInfo?: McpClientInfo;
 }): AnalyticsIngestBatch | null => {
   const key = `${actorId}:${sessionId}`;
@@ -230,7 +232,6 @@ export const buildSessionInitBatch = ({
       buildSessionInitEvent({
         actorId,
         sessionId,
-        requestId,
         startedAt,
         extra,
         clientInfo,

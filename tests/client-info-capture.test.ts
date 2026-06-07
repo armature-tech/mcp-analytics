@@ -322,7 +322,6 @@ test("buildSessionInitEvent falls back to x-mcp-client header when no clientInfo
   const event = buildSessionInitEvent({
     actorId: "actor-x",
     sessionId: "session-x",
-    requestId: "req-x",
     startedAt: new Date(0).toISOString(),
     extra: {
       requestInfo: {
@@ -387,7 +386,6 @@ test("buildSessionInitEvent prefers clientInfo over header fallback", () => {
   const event = buildSessionInitEvent({
     actorId: "actor-y",
     sessionId: "session-y",
-    requestId: "req-y",
     startedAt: new Date(0).toISOString(),
     extra: {
       requestInfo: {

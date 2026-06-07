@@ -11,6 +11,7 @@ import {
   type AnalyticsIngestBatch,
   type JsonObjectSchema,
 } from "../src/index.js";
+import { createBoundedKeySet } from "../src/utils.js";
 
 test("decorates Zod input schemas with telemetry", () => {
   const schema = z.object({ customer_id: z.string() });
@@ -630,7 +631,6 @@ test("buildSessionInitEvent populates harness fields from clientInfo", () => {
   const event = buildSessionInitEvent({
     actorId: "actor",
     sessionId: "session-abc",
-    requestId: "req-1",
     startedAt: "2026-06-03T00:00:00.000Z",
     extra: {
       requestInfo: { headers: { "user-agent": "Test/1.0" } },
@@ -654,7 +654,6 @@ test("buildSessionInitEvent falls back to authInfo.clientId for client_name when
   const event = buildSessionInitEvent({
     actorId: "actor",
     sessionId: "session-abc",
-    requestId: "req-2",
     startedAt: "2026-06-03T00:00:00.000Z",
     extra: {
       authInfo: { clientId: "oauth-client-xyz" },
@@ -673,7 +672,6 @@ test("buildSessionInitEvent drops capabilities >4 KB to null instead of truncati
   const event = buildSessionInitEvent({
     actorId: "actor",
     sessionId: "session-abc",
-    requestId: "req-3",
     startedAt: "2026-06-03T00:00:00.000Z",
     clientInfo: {
       name: "Claude Desktop",
@@ -689,7 +687,6 @@ test("buildSessionInitEvent prefers clientInfo.name over authInfo.clientId", () 
   const event = buildSessionInitEvent({
     actorId: "actor",
     sessionId: "session-abc",
-    requestId: "req-4",
     startedAt: "2026-06-03T00:00:00.000Z",
     extra: { authInfo: { clientId: "oauth-client-xyz" } },
     clientInfo: { name: "Claude Desktop" },
@@ -864,4 +861,81 @@ test("attaching the same recorder to two McpServers throws", () => {
     () => recorder.createMcpServer({ name: "second", version: "0.0.1" }),
     /already attached/,
   );
+});
+
+test("createBoundedKeySet evicts the oldest key in FIFO order once it exceeds the cap", () => {
+  const set = createBoundedKeySet(3);
+  set.add("a");
+  set.add("b");
+  set.add("c");
+  assert.equal(set.has("a"), true);
+
+  set.add("d"); // overflow → evicts "a" (oldest)
+  assert.equal(set.has("a"), false);
+  assert.equal(set.has("b"), true);
+  assert.equal(set.has("d"), true);
+
+  // Re-adding an existing key is a no-op: no growth, and (FIFO by first
+  // insertion) it does NOT refresh position, so "b" stays the oldest.
+  set.add("b");
+  set.add("e"); // overflow → evicts "b" (oldest), leaving {c, d, e}
+  assert.equal(set.has("b"), false);
+  assert.equal(set.has("c"), true);
+  assert.equal(set.has("d"), true);
+  assert.equal(set.has("e"), true);
+});
+
+test("session_init event_id is stable per (actorId, sessionId) and distinct across sessions/actors", () => {
+  const make = (actorId: string, sessionId: string, startedAtMs: number, name?: string) =>
+    buildSessionInitEvent({
+      actorId,
+      sessionId,
+      startedAt: new Date(startedAtMs).toISOString(),
+      ...(name ? { clientInfo: { name } } : {}),
+    });
+
+  const a = make("actor-1", "sess-a", 0);
+  // Same (actor, session) but different time + clientInfo → still the same id,
+  // so a re-emit after the bounded set evicts collapses to one row at ingest.
+  const aAgain = make("actor-1", "sess-a", 5_000, "Different Client");
+  const otherSession = make("actor-1", "sess-b", 0);
+  const otherActor = make("actor-2", "sess-a", 0);
+
+  assert.equal(a.event_id, aAgain.event_id);
+  assert.notEqual(a.event_id, otherSession.event_id);
+  assert.notEqual(a.event_id, otherActor.event_id);
+});
+
+test("a fresh recorder re-emits session_init for the same (actor, session) with an identical event_id", async () => {
+  // Simulates a serverless cold start / process restart (or a bounded-set
+  // eviction): the in-memory sessionInitKeys is empty, so session_init fires
+  // again — but ingest de-dups it because the event_id is stable.
+  const run = async () => {
+    const batches: AnalyticsIngestBatch[] = [];
+    const recorder = createAnalyticsRecorder({
+      armature: {
+        delivery: "await",
+        actorId: "restart-actor",
+        emit: (batch) => {
+          batches.push(batch);
+        },
+      },
+    });
+    await recorder.recordToolCall({
+      name: "ping",
+      args: {},
+      extra: { sessionId: "sess-restart" },
+      status: "ok",
+      result: { ok: true },
+    });
+    const sessionInit = batches
+      .flatMap((b) => b.events)
+      .find((e) => e.kind === "session_init");
+    assert.ok(sessionInit);
+    return sessionInit;
+  };
+
+  const first = await run();
+  const second = await run();
+  assert.equal(first?.event_id, second?.event_id);
 });
