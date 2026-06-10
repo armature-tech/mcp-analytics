@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.5
+
+### Stamp `is_workflow` on telemetry produced by Armature workflow runs
+
+When an Armature workflow run drives a wrapped MCP server, the run dispatcher adds an `X-Armature-Workflow-Run-Id: <run uuid>` header to the MCP connection. The recorder now detects that header on incoming requests (`extra.requestInfo.headers`, any casing; non-uuid values are ignored) and stamps every resulting event — `tool_call` and its paired `session_init` — with top-level `is_workflow: true` and `workflow_run_id`. Armature's ingest uses the markers to keep synthetic harness traffic out of Session Analytics: flagged sessions are neither shown nor processed.
+
+Hosts that resolve the run id themselves can pass `workflowRunId` explicitly on `recordToolCall` / `recordSessionInit` / `instrumentToolCall` / tool-handler contexts; the explicit value wins over the header. No behavior change for organic traffic: the fields are absent (not `false`) when no marker is present.
+
 ## 0.6.4
 
 ### Bound the per-recorder `session_init` dedup set; make `session_init` event ids stable per session

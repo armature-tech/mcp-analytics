@@ -34,7 +34,7 @@ import {
   INTENT_DESCRIPTION,
   TELEMETRY_PROPERTY_DESCRIPTION,
 } from "./schema.js";
-import { createBoundedKeySet, isJsonObjectSchema, isRecord } from "./utils.js";
+import { createBoundedKeySet, isJsonObjectSchema, isRecord, workflowRunIdFromHeaders } from "./utils.js";
 import type { JsonObjectSchema } from "./types.js";
 import {
   getClientInfoForSessionId,
@@ -130,6 +130,19 @@ export const createAnalyticsRecorder = (
     });
   };
 
+  // Explicit caller-supplied workflowRunId wins; otherwise derive it from
+  // the x-armature-workflow-run-id header the Armature run dispatcher adds
+  // to MCP connections opened by workflow runs. Either way the resulting
+  // events are stamped is_workflow so Session Analytics excludes them.
+  const resolveWorkflowRunId = (event: {
+    workflowRunId?: string;
+    headers?: RecordSessionInitEvent["headers"];
+    extra?: RequestExtra;
+  }) => {
+    return event.workflowRunId
+      ?? workflowRunIdFromHeaders(event.headers ?? event.extra?.requestInfo?.headers);
+  };
+
   const recordSessionInit = async (event: RecordSessionInitEvent) => {
     const sessionId = normalizeSessionId(event.sessionId, event.extra);
     if (!sessionId) return;
@@ -153,6 +166,7 @@ export const createAnalyticsRecorder = (
       extra: event.extra,
       sessionInitKeys,
       clientInfo: event.clientInfo ?? getClientInfoForSessionId(sessionId),
+      workflowRunId: resolveWorkflowRunId(event),
     });
 
     if (batch) await emitBatch(batch);
@@ -184,6 +198,7 @@ export const createAnalyticsRecorder = (
         ? event.error.message
         : String(event.error);
 
+    const workflowRunId = resolveWorkflowRunId(event);
     const toolCallEvent = buildToolCallEvent({
       toolName: event.name,
       telemetry: event.telemetry,
@@ -197,6 +212,7 @@ export const createAnalyticsRecorder = (
       requestId,
       startedAt,
       finishedAt,
+      workflowRunId,
     });
 
     // An explicit clientInfo on the event always wins; otherwise look up
@@ -215,6 +231,7 @@ export const createAnalyticsRecorder = (
         startedAt,
         sessionInitKeys,
         clientInfo: effectiveClientInfo,
+        workflowRunId,
       }),
     );
   };

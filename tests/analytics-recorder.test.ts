@@ -939,3 +939,86 @@ test("a fresh recorder re-emits session_init for the same (actor, session) with 
   const second = await run();
   assert.equal(first?.event_id, second?.event_id);
 });
+
+test("stamps is_workflow from the x-armature-workflow-run-id header", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: () => "actor-seed",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+  const runId = "11111111-2222-4333-8444-555555555555";
+
+  await recorder.recordToolCall({
+    name: "lookup_customer",
+    args: { customer_id: "cus_123" },
+    sessionId: "session_wf",
+    requestId: "request_wf_1",
+    durationMs: 5,
+    status: "ok",
+    result: { content: [] },
+    extra: {
+      sessionId: "session_wf",
+      requestInfo: { headers: { "X-Armature-Workflow-Run-Id": runId } },
+    },
+  });
+
+  assert.equal(batches.length, 1);
+  const events = batches[0]?.events ?? [];
+  assert.equal(events.length, 2);
+  for (const event of events) {
+    assert.equal(event.is_workflow, true);
+    assert.equal(event.workflow_run_id, runId);
+  }
+});
+
+test("explicit workflowRunId wins; invalid header values are ignored", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: () => "actor-seed",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+  const runId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+
+  await recorder.recordToolCall({
+    name: "lookup_customer",
+    args: {},
+    sessionId: "session_explicit",
+    requestId: "request_wf_2",
+    durationMs: 5,
+    status: "ok",
+    workflowRunId: runId,
+  });
+  await recorder.recordToolCall({
+    name: "lookup_customer",
+    args: {},
+    sessionId: "session_bad_header",
+    requestId: "request_wf_3",
+    durationMs: 5,
+    status: "ok",
+    extra: {
+      sessionId: "session_bad_header",
+      requestInfo: { headers: { "x-armature-workflow-run-id": "not-a-uuid" } },
+    },
+  });
+
+  const explicitEvent = batches[0]?.events.find((e) => e.kind === "tool_call");
+  assert.equal(explicitEvent?.is_workflow, true);
+  assert.equal(explicitEvent?.workflow_run_id, runId);
+
+  const badHeaderEvents = batches[1]?.events ?? [];
+  assert.ok(badHeaderEvents.length > 0);
+  for (const event of badHeaderEvents) {
+    assert.equal(event.is_workflow, undefined);
+    assert.equal(event.workflow_run_id, undefined);
+  }
+});

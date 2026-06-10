@@ -81,6 +81,24 @@ export const truncateUtf8 = (value: string, maxBytes: number) => {
   };
 };
 
+// The Armature run dispatcher stamps this header on MCP connections opened
+// by workflow runs. Telemetry produced under it is synthetic harness traffic:
+// events carry `is_workflow` / `workflow_run_id` so Session Analytics can
+// exclude them from every user-facing surface and processing pipeline.
+export const WORKFLOW_RUN_ID_HEADER = "x-armature-workflow-run-id";
+
+// Version nibble allows 1-8 so time-ordered v7 ids keep working if the run
+// dispatcher ever stops minting v4.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export const workflowRunIdFromHeaders = (
+  headers: HeaderBag | undefined,
+): string | undefined => {
+  const raw = headerValue(headers, WORKFLOW_RUN_ID_HEADER);
+  const value = typeof raw === "string" ? raw.trim() : "";
+  return UUID_RE.test(value) ? value : undefined;
+};
+
 export const headerValue = (headers: HeaderBag | undefined, name: string) => {
   if (!headers) return null;
   if (headers instanceof Headers) return headers.get(name);

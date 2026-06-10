@@ -62,6 +62,16 @@ const buildToolCallSource = (toolName: string, input: unknown) => {
   return `MCP tool call: ${toolName}\n\nInput:\n${stringifyPreview(input)}`;
 };
 
+// Marks an event as synthetic traffic from an Armature workflow run so
+// Session Analytics can exclude it. Spread first in the event literal —
+// absent when the call did not originate from a workflow run.
+const workflowStamp = (
+  workflowRunId: string | undefined,
+): Pick<AnalyticsIngestEvent, "is_workflow" | "workflow_run_id"> | Record<string, never> => {
+  if (!workflowRunId) return {};
+  return { is_workflow: true, workflow_run_id: workflowRunId };
+};
+
 export const buildToolCallEvent = ({
   toolName,
   telemetry,
@@ -75,6 +85,7 @@ export const buildToolCallEvent = ({
   requestId,
   startedAt,
   finishedAt,
+  workflowRunId,
 }: {
   toolName: string;
   telemetry?: TelemetryArgs;
@@ -88,6 +99,7 @@ export const buildToolCallEvent = ({
   requestId: string;
   startedAt: string;
   finishedAt: string;
+  workflowRunId?: string;
 }): AnalyticsIngestEvent => {
   const inputPreview = truncateUtf8(stringifyPreview(input), MAX_PREVIEW_BYTES);
   const source = truncateUtf8(buildToolCallSource(toolName, input), MAX_SOURCE_BYTES);
@@ -96,6 +108,7 @@ export const buildToolCallEvent = ({
     : truncateUtf8(stringifyPreview(output), MAX_PREVIEW_BYTES);
 
   return {
+    ...workflowStamp(workflowRunId),
     event_id: buildEventId({ actorId, requestId, kind: "tool_call" }),
     kind: "tool_call",
     actor_id: actorId,
@@ -128,14 +141,17 @@ export const buildSessionInitEvent = ({
   startedAt,
   extra,
   clientInfo,
+  workflowRunId,
 }: {
   actorId: string;
   sessionId: string;
   startedAt: string;
   extra?: RequestExtra;
   clientInfo?: McpClientInfo;
+  workflowRunId?: string;
 }): AnalyticsIngestEvent => {
   return {
+    ...workflowStamp(workflowRunId),
     // Stable per (actorId, sessionId): a session has exactly one session_init,
     // so seeding the id with the sessionId lets ingest de-dup it on its own —
     // independent of the in-memory `sessionInitKeys` set (which is now bounded
@@ -179,6 +195,7 @@ export const buildBatch = ({
   startedAt,
   sessionInitKeys,
   clientInfo,
+  workflowRunId,
 }: {
   event: AnalyticsIngestEvent;
   extra?: RequestExtra;
@@ -186,6 +203,7 @@ export const buildBatch = ({
   startedAt: string;
   sessionInitKeys: BoundedKeySet;
   clientInfo?: McpClientInfo;
+  workflowRunId?: string;
 }): AnalyticsIngestBatch => {
   const events: AnalyticsIngestEvent[] = [];
 
@@ -199,6 +217,7 @@ export const buildBatch = ({
         startedAt,
         extra,
         clientInfo,
+        workflowRunId,
       }));
     }
   }
@@ -214,6 +233,7 @@ export const buildSessionInitBatch = ({
   extra,
   sessionInitKeys,
   clientInfo,
+  workflowRunId,
 }: {
   actorId: string;
   sessionId: string;
@@ -221,6 +241,7 @@ export const buildSessionInitBatch = ({
   extra?: RequestExtra;
   sessionInitKeys: BoundedKeySet;
   clientInfo?: McpClientInfo;
+  workflowRunId?: string;
 }): AnalyticsIngestBatch | null => {
   const key = `${actorId}:${sessionId}`;
   if (sessionInitKeys.has(key)) return null;
@@ -235,6 +256,7 @@ export const buildSessionInitBatch = ({
         startedAt,
         extra,
         clientInfo,
+        workflowRunId,
       }),
     ],
   };

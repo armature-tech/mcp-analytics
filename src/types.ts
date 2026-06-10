@@ -110,6 +110,9 @@ export type RecordSessionInitEvent = {
   requestId?: string;
   startedAt?: string | Date | number;
   clientInfo?: McpClientInfo;
+  // Explicit workflow-run marker; when absent it is derived from the
+  // x-armature-workflow-run-id request header. See workflowRunIdFromHeaders.
+  workflowRunId?: string;
 };
 
 export type RecordToolCallEvent = {
@@ -128,6 +131,7 @@ export type RecordToolCallEvent = {
   result?: unknown;
   error?: unknown;
   clientInfo?: McpClientInfo;
+  workflowRunId?: string;
 };
 
 export type InstrumentToolCallEvent = {
@@ -140,6 +144,7 @@ export type InstrumentToolCallEvent = {
   sessionId?: string;
   requestId?: string;
   clientInfo?: McpClientInfo;
+  workflowRunId?: string;
 };
 
 export type ToolCallHandler<T> = (args: unknown) => T | Promise<T>;
@@ -152,6 +157,7 @@ export type ToolHandlerContext = {
   sessionId?: string;
   requestId?: string;
   clientInfo?: McpClientInfo;
+  workflowRunId?: string;
 };
 
 export type RegisteredToolHandler<TArgs, TResult> = (
@@ -217,6 +223,10 @@ export type AnalyticsIngestEvent = {
   calls: unknown[];
   logs: unknown[];
   search_calls: unknown[];
+  // Present (true + the run uuid) only on telemetry produced by an Armature
+  // workflow run; Session Analytics excludes such events and their sessions.
+  is_workflow?: boolean;
+  workflow_run_id?: string;
 };
 
 export type AnalyticsIngestBatch = {
