@@ -100,6 +100,10 @@ The recorder also parses identity-bearing session ids on its own as a last-resor
 fallback, so client attribution works even when only the transport side is wired.
 Use `delivery: "await"` in serverless (see Delivery mode below).
 
+Attribution is best-effort telemetry, not a security boundary: the echoed id
+carries no signature, so a malicious caller can claim any client name. Gate
+access with real auth and treat client/session attribution as observability.
+
 ## Configuration
 
 ```ts

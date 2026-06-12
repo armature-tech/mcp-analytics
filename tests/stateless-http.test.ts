@@ -18,7 +18,7 @@ test("session id round-trips client identity", () => {
 });
 
 test("anonymous and malformed session ids parse to undefined", () => {
-  assert.match(buildStatelessSessionId(undefined), /^mcp_unknown_v_0_/);
+  assert.match(buildStatelessSessionId(undefined), /^mcp_unknown_v__/);
   assert.equal(parseStatelessSessionClientInfo(buildStatelessSessionId(undefined)), undefined);
   assert.equal(parseStatelessSessionClientInfo("session_123"), undefined);
   assert.equal(parseStatelessSessionClientInfo(""), undefined);
@@ -49,7 +49,7 @@ test("initialize inside a batch is detected", () => {
     ],
   });
   assert.equal(session.isInitialize, true);
-  assert.match(session.sessionId, /^mcp_vscode_v_0_/);
+  assert.match(session.sessionId, /^mcp_vscode_v__/);
 });
 
 test("tool-call requests recover identity from the echoed header (record and Headers)", () => {

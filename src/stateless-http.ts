@@ -14,6 +14,10 @@ import { headerValue, isRecord } from "./utils.js";
 // subsequent request, so each invocation can parse client name/version back
 // out of the header — warm or cold.
 //
+// Attribution is best-effort telemetry, not a security boundary: the echoed
+// id carries no signature, so any caller can claim any client name. Gate
+// access with real auth; treat client/session attribution as observability.
+//
 // `resolveStatelessHttpSession` is the one-call integration:
 //
 //   const session = resolveStatelessHttpSession({ body: req.body, headers: req.headers });
@@ -38,8 +42,10 @@ const slugPart = (value: unknown, fallback: string): string => {
 };
 
 /** Mint a session id that carries the client identity from `initialize`. */
+// Version falls back to an empty segment (`_v__`) so a client that never
+// reported a version stays distinguishable from one reporting literal "0".
 export const buildStatelessSessionId = (clientInfo?: McpClientInfo): string =>
-  `mcp_${slugPart(clientInfo?.name, ANONYMOUS_NAME)}_v_${slugPart(clientInfo?.version, "0")}_${randomUUID()}`;
+  `mcp_${slugPart(clientInfo?.name, ANONYMOUS_NAME)}_v_${slugPart(clientInfo?.version, "")}_${randomUUID()}`;
 
 /** Recover the client identity from an identity-bearing session id. */
 export const parseStatelessSessionClientInfo = (
