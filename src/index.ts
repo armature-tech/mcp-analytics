@@ -48,6 +48,13 @@ export {
 
 export { createAnalyticsRecorder } from "./recorder.js";
 
+export {
+  buildStatelessSessionId,
+  parseStatelessSessionClientInfo,
+  resolveStatelessHttpSession,
+  type StatelessHttpSession,
+} from "./stateless-http.js";
+
 export { createMcpAnalyticsServer, withMcpAnalytics } from "./server.js";
 
 export {

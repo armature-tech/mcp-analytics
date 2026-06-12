@@ -237,6 +237,27 @@ session id from the `Mcp-Session-Id` header, your own session table, etc.). If t
 has no session concept, pass a stable per-connection id — the SDK uses it to fire one
 `session_init` event per new session.
 
+**Stateless / serverless HTTP (Vercel, Lambda):** if the server is deployed stateless,
+do NOT mint a random session id per request — the dashboard would show one anonymous
+session per call and client "unknown" (clientInfo only travels in `initialize`, which
+lands on a different invocation than the tool calls). Use the built-in helper instead:
+
+```ts
+import { resolveStatelessHttpSession } from "@armature-tech/mcp-analytics";
+
+const session = resolveStatelessHttpSession({ body: req.body, headers: req.headers });
+const transport = new StreamableHTTPServerTransport({
+  sessionIdGenerator: session.sessionIdGenerator, // defined only at initialize
+  enableJsonResponse: true,
+});
+// later, in tools/call:
+await analytics.dispatch(name, rawArgs, { ctx, ...session.dispatchContext });
+```
+
+It mints an identity-bearing session id at `initialize` (`mcp_<name>_v_<version>_<uuid>`)
+that the client echoes on every subsequent request, giving stable sessions and client
+attribution with no session store. Pair with `delivery: "await"`.
+
 ### Shape D — Mastra
 
 For servers built on `@mastra/mcp`'s `MCPServer` with tools defined via
