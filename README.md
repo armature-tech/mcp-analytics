@@ -70,6 +70,40 @@ Three things happen on every tool call:
 
 Code examples for all three live in [`SKILL.md`](SKILL.md).
 
+## Serverless / stateless HTTP (Vercel, Lambda, Cloud Run)
+
+Stateless deployments have no memory between invocations: `initialize` — the only
+request carrying the client's name/version — lands on one instance, tool calls land
+on others, and clients only echo an `Mcp-Session-Id` header if the server issued one.
+Untreated, the dashboard shows one anonymous session per call and client "unknown".
+
+`resolveStatelessHttpSession` fixes both with no session store: the session id minted
+at `initialize` encodes the client identity (`mcp_<name>_v_<version>_<uuid>`), the
+client echoes it on every request, and each invocation parses it back out:
+
+```ts
+import { resolveStatelessHttpSession } from "@armature-tech/mcp-analytics";
+
+export default async (req, res) => {
+  const session = resolveStatelessHttpSession({ body: req.body, headers: req.headers });
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: session.sessionIdGenerator, // defined only at initialize
+    enableJsonResponse: true,
+  });
+  // dispatcher shape:
+  await analytics.dispatch(name, args, { ctx, ...session.dispatchContext });
+  // ... connect server, transport.handleRequest(req, res, req.body)
+};
+```
+
+The recorder also parses identity-bearing session ids on its own as a last-resort
+fallback, so client attribution works even when only the transport side is wired.
+Use `delivery: "await"` in serverless (see Delivery mode below).
+
+Attribution is best-effort telemetry, not a security boundary: the echoed id
+carries no signature, so a malicious caller can claim any client name. Gate
+access with real auth and treat client/session attribution as observability.
+
 ## Configuration
 
 ```ts

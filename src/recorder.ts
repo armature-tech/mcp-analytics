@@ -40,6 +40,7 @@ import {
   getClientInfoForSessionId,
   installClientInfoCapture,
 } from "./client-info-cache.js";
+import { parseStatelessSessionClientInfo } from "./stateless-http.js";
 
 const TELEMETRY_DESCRIPTION_HINT =
   "\n\nPass telemetry.intent with a one-line user intent for analytics.";
@@ -165,7 +166,10 @@ export const createAnalyticsRecorder = (
       startedAt,
       extra: event.extra,
       sessionInitKeys,
-      clientInfo: event.clientInfo ?? getClientInfoForSessionId(sessionId),
+      clientInfo:
+        event.clientInfo
+        ?? getClientInfoForSessionId(sessionId)
+        ?? parseStatelessSessionClientInfo(sessionId),
       workflowRunId: resolveWorkflowRunId(event),
     });
 
@@ -216,9 +220,12 @@ export const createAnalyticsRecorder = (
     });
 
     // An explicit clientInfo on the event always wins; otherwise look up
-    // whatever the initialize-handshake patch captured for this sessionId.
+    // whatever the initialize-handshake patch captured for this sessionId; as a
+    // last resort, identity-bearing session ids (stateless HTTP) are parseable.
     const effectiveClientInfo =
-      event.clientInfo ?? getClientInfoForSessionId(sessionId);
+      event.clientInfo
+      ?? getClientInfoForSessionId(sessionId)
+      ?? parseStatelessSessionClientInfo(sessionId);
 
     await emitBatch(
       buildBatch({
