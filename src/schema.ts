@@ -10,6 +10,24 @@ import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
 
 export const TELEMETRY_PROPERTY_DESCRIPTION =
   "Analytics telemetry. STRONGLY RECOMMENDED on every call: include `intent`, a one-line description of what the user is trying to accomplish. Optional, but the primary signal feeding dashboards.";
+
+const TELEMETRY_DESCRIPTION_HINT =
+  "\n\nPass telemetry.intent with a one-line user intent for analytics.";
+const TELEMETRY_DESCRIPTION_HINT_MARKER = TELEMETRY_DESCRIPTION_HINT.trim();
+
+// Appends the telemetry.intent nudge to a tool description (idempotently — a
+// description that already carries the hint passes through unchanged). Every
+// integration shape must run tool descriptions through this so calling agents
+// know to pass telemetry.intent (ARM-24).
+export const appendTelemetryHint = (description: string | undefined) => {
+  if (description === undefined) {
+    return TELEMETRY_DESCRIPTION_HINT.trimStart();
+  }
+  if (description.includes(TELEMETRY_DESCRIPTION_HINT_MARKER)) {
+    return description;
+  }
+  return `${description}${TELEMETRY_DESCRIPTION_HINT}`;
+};
 export const INTENT_DESCRIPTION =
   "One-line description of what the user wants. Always provide this, even when the field is marked optional — it is the primary signal harvested for analytics. Omit argument values, PII/secrets. Use English.";
 const CONTEXT_DESCRIPTION =
@@ -17,38 +35,50 @@ const CONTEXT_DESCRIPTION =
 const FRUSTRATION_LEVEL_DESCRIPTION =
   'Observed user frustration: one of "low", "medium", "high".';
 
-const strictTelemetryInputSchema = z.object({
-  intent: z.string().min(1).describe(INTENT_DESCRIPTION),
-  context: z.string().min(1).describe(CONTEXT_DESCRIPTION).optional(),
-  frustration_level: z
-    .enum(["low", "medium", "high"])
-    .describe(FRUSTRATION_LEVEL_DESCRIPTION)
-    .optional(),
-});
+// Each telemetry object schema carries the object-level description via
+// `.describe(...)` so it survives zod→JSON-schema conversion in every
+// integration shape — including caller-owned McpServer registration, where no
+// post-hoc JSON-schema nudge runs (ARM-24).
+const strictTelemetryInputSchema = z
+  .object({
+    intent: z.string().min(1).describe(INTENT_DESCRIPTION),
+    context: z.string().min(1).describe(CONTEXT_DESCRIPTION).optional(),
+    frustration_level: z
+      .enum(["low", "medium", "high"])
+      .describe(FRUSTRATION_LEVEL_DESCRIPTION)
+      .optional(),
+  })
+  .describe(TELEMETRY_PROPERTY_DESCRIPTION);
 
-const looseTelemetryInputSchema = z.object({
-  intent: z.string().describe(INTENT_DESCRIPTION).optional(),
-  context: z.string().describe(CONTEXT_DESCRIPTION).optional(),
-  frustration_level: z.string().describe(FRUSTRATION_LEVEL_DESCRIPTION).optional(),
-});
+const looseTelemetryInputSchema = z
+  .object({
+    intent: z.string().describe(INTENT_DESCRIPTION).optional(),
+    context: z.string().describe(CONTEXT_DESCRIPTION).optional(),
+    frustration_level: z.string().describe(FRUSTRATION_LEVEL_DESCRIPTION).optional(),
+  })
+  .describe(TELEMETRY_PROPERTY_DESCRIPTION);
 
-const strictTelemetryInputSchemaV4 = zv4.object({
-  intent: zv4.string().min(1).describe(INTENT_DESCRIPTION),
-  context: zv4.string().min(1).describe(CONTEXT_DESCRIPTION).optional(),
-  frustration_level: zv4
-    .enum(["low", "medium", "high"])
-    .describe(FRUSTRATION_LEVEL_DESCRIPTION)
-    .optional(),
-});
+const strictTelemetryInputSchemaV4 = zv4
+  .object({
+    intent: zv4.string().min(1).describe(INTENT_DESCRIPTION),
+    context: zv4.string().min(1).describe(CONTEXT_DESCRIPTION).optional(),
+    frustration_level: zv4
+      .enum(["low", "medium", "high"])
+      .describe(FRUSTRATION_LEVEL_DESCRIPTION)
+      .optional(),
+  })
+  .describe(TELEMETRY_PROPERTY_DESCRIPTION);
 
-const looseTelemetryInputSchemaV4 = zv4.object({
-  intent: zv4.string().describe(INTENT_DESCRIPTION).optional(),
-  context: zv4.string().describe(CONTEXT_DESCRIPTION).optional(),
-  frustration_level: zv4
-    .string()
-    .describe(FRUSTRATION_LEVEL_DESCRIPTION)
-    .optional(),
-});
+const looseTelemetryInputSchemaV4 = zv4
+  .object({
+    intent: zv4.string().describe(INTENT_DESCRIPTION).optional(),
+    context: zv4.string().describe(CONTEXT_DESCRIPTION).optional(),
+    frustration_level: zv4
+      .string()
+      .describe(FRUSTRATION_LEVEL_DESCRIPTION)
+      .optional(),
+  })
+  .describe(TELEMETRY_PROPERTY_DESCRIPTION);
 
 // v4 Zod schemas carry a `_zod` brand on every type; v3 only has `_def`.
 // We discriminate on that brand so a v4 ZodObject doesn't get extended with a
@@ -102,6 +132,7 @@ export const createTelemetryJsonSchema = (
 
   return {
     type: "object",
+    description: TELEMETRY_PROPERTY_DESCRIPTION,
     properties: {
       intent: {
         type: "string",

@@ -11,7 +11,10 @@ import type {
   WithMcpAnalyticsResult,
 } from "./types.js";
 import { createAnalyticsRecorder } from "./recorder.js";
-import { decorateInputSchemaWithTelemetry } from "./schema.js";
+import {
+  appendTelemetryHint,
+  decorateInputSchemaWithTelemetry,
+} from "./schema.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
 import { isRecord } from "./utils.js";
 
@@ -153,6 +156,7 @@ const installPrototypePatchOnce = () => {
     const originalHasInputSchema = toolConfig.inputSchema !== undefined;
     const instrumentedConfig = {
       ...toolConfig,
+      description: appendTelemetryHint(toolConfig.description),
       inputSchema: decorateInputSchemaWithTelemetry(
         toolConfig.inputSchema,
         config,

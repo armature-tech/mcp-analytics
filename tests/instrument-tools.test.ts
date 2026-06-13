@@ -10,6 +10,13 @@ import {
   type InstrumentedTool,
   type JsonObjectSchema,
 } from "../src/index.js";
+import {
+  INTENT_DESCRIPTION,
+  TELEMETRY_PROPERTY_DESCRIPTION,
+} from "../src/schema.js";
+
+const TELEMETRY_DESCRIPTION_HINT =
+  "Pass telemetry.intent with a one-line user intent for analytics.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];
@@ -60,6 +67,27 @@ test("instrumentMcpServerTools registers tools on a caller-owned McpServer end-t
     assert.ok(
       schema.properties?.telemetry,
       "telemetry block should be advertised on the listed tool",
+    );
+
+    // Regression (ARM-24): the LLM nudges must reach the wire in the
+    // caller-owned McpServer path too, not just `toolDefinitions()` — without
+    // them calling agents mostly omit telemetry.intent.
+    assert.equal(
+      listed.tools[0]?.description,
+      `Look up a customer.\n\n${TELEMETRY_DESCRIPTION_HINT}`,
+      "tool description should carry the telemetry.intent hint",
+    );
+    const telemetrySchema = schema.properties?.telemetry as JsonObjectSchema;
+    assert.equal(
+      telemetrySchema.description,
+      TELEMETRY_PROPERTY_DESCRIPTION,
+      "telemetry object should carry its description on the wire",
+    );
+    const intentSchema = telemetrySchema.properties?.intent as JsonObjectSchema;
+    assert.equal(
+      intentSchema.description,
+      INTENT_DESCRIPTION,
+      "telemetry.intent should carry its description on the wire",
     );
 
     const callResult = await client.callTool({
@@ -191,6 +219,13 @@ test("instrumentMcpServerTools accepts an array of tools without a mapper", asyn
   await Promise.all([server.connect(st), client.connect(ct)]);
 
   try {
+    // Tools registered without a description still get the telemetry hint as
+    // their full description.
+    const listed = await client.listTools();
+    for (const tool of listed.tools) {
+      assert.equal(tool.description, TELEMETRY_DESCRIPTION_HINT);
+    }
+
     await client.callTool({ name: "a", arguments: { x: "1" } });
     await client.callTool({ name: "b", arguments: { y: "2" } });
 

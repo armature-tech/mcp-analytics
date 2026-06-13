@@ -1,5 +1,8 @@
 import { createAnalyticsRecorder } from "./recorder.js";
-import { decorateInputSchemaWithTelemetry } from "./schema.js";
+import {
+  appendTelemetryHint,
+  decorateInputSchemaWithTelemetry,
+} from "./schema.js";
 import type {
   AnalyticsRecorder,
   HeaderBag,
@@ -187,6 +190,7 @@ const wrapOneTool = (
 
   return {
     ...tool,
+    description: appendTelemetryHint(tool.description),
     ...(decoratedInputSchema !== undefined
       ? { inputSchema: decoratedInputSchema }
       : {}),
