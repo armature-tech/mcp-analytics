@@ -47,7 +47,7 @@ test("wrapMastraTools decorates Zod inputSchema with the telemetry block", () =>
   });
 });
 
-test("wrapMastraTools preserves id, description, and unrelated tool properties", () => {
+test("wrapMastraTools preserves id and unrelated tool properties, nudges the description", () => {
   const annotations = { readOnly: true };
   const tools: Record<string, MastraTool> = {
     echo: {
@@ -61,7 +61,12 @@ test("wrapMastraTools preserves id, description, and unrelated tool properties",
 
   const wrapped = wrapMastraTools(tools);
   assert.equal(wrapped.echo?.id, "echo");
-  assert.equal(wrapped.echo?.description, "Echo back.");
+  // The description keeps its original text and gains the telemetry.intent
+  // nudge (ARM-24), like every other integration shape.
+  assert.equal(
+    wrapped.echo?.description,
+    "Echo back.\n\nPass telemetry.intent with a one-line user intent for analytics.",
+  );
   assert.equal(wrapped.echo?.annotations, annotations);
   assert.notEqual(wrapped.echo?.execute, tools.echo?.execute);
 });

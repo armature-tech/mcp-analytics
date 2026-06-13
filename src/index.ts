@@ -26,6 +26,7 @@ export type {
 } from "./types.js";
 
 export {
+  appendTelemetryHint,
   createTelemetryInputSchema,
   createTelemetryJsonSchema,
   decorateInputSchemaWithTelemetry,

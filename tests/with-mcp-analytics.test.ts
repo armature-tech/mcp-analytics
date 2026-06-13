@@ -9,6 +9,10 @@ import {
   type AnalyticsIngestBatch,
   type JsonObjectSchema,
 } from "../src/index.js";
+import { TELEMETRY_PROPERTY_DESCRIPTION } from "../src/schema.js";
+
+const TELEMETRY_DESCRIPTION_HINT =
+  "Pass telemetry.intent with a one-line user intent for analytics.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];
@@ -53,6 +57,15 @@ test("withMcpAnalytics instruments server.registerTool calls end-to-end", async 
     const listed = await client.listTools();
     const schema = listed.tools[0]?.inputSchema as JsonObjectSchema;
     assert.ok(schema.properties?.telemetry, "telemetry property should be advertised");
+    // The LLM nudges (ARM-24) must reach the wire in this path too.
+    assert.equal(
+      listed.tools[0]?.description,
+      `Look up a customer.\n\n${TELEMETRY_DESCRIPTION_HINT}`,
+    );
+    assert.equal(
+      (schema.properties?.telemetry as JsonObjectSchema).description,
+      TELEMETRY_PROPERTY_DESCRIPTION,
+    );
 
     const callResult = await client.callTool({
       name: "lookup_customer",

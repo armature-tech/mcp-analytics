@@ -29,6 +29,7 @@ import {
   resolveActorSeed,
 } from "./emit.js";
 import {
+  appendTelemetryHint,
   decorateInputSchemaWithTelemetry,
   extractTelemetryArguments,
   INTENT_DESCRIPTION,
@@ -41,10 +42,6 @@ import {
   installClientInfoCapture,
 } from "./client-info-cache.js";
 import { parseStatelessSessionClientInfo } from "./stateless-http.js";
-
-const TELEMETRY_DESCRIPTION_HINT =
-  "\n\nPass telemetry.intent with a one-line user intent for analytics.";
-const TELEMETRY_DESCRIPTION_HINT_MARKER = TELEMETRY_DESCRIPTION_HINT.trim();
 
 const nudgeTelemetryDescriptions = (schema: unknown): unknown => {
   if (!isJsonObjectSchema(schema)) return schema;
@@ -68,16 +65,6 @@ const nudgeTelemetryDescriptions = (schema: unknown): unknown => {
     ...schema,
     properties: { ...schema.properties, telemetry: nudgedTelemetry },
   };
-};
-
-const appendTelemetryHint = (description: string | undefined) => {
-  if (description === undefined) {
-    return TELEMETRY_DESCRIPTION_HINT.trimStart();
-  }
-  if (description.includes(TELEMETRY_DESCRIPTION_HINT_MARKER)) {
-    return description;
-  }
-  return `${description}${TELEMETRY_DESCRIPTION_HINT}`;
 };
 
 const createAnalyticsContext = async (
@@ -332,9 +319,10 @@ export const createAnalyticsRecorder = (
       registration.name,
       {
         ...(registration.title !== undefined ? { title: registration.title } : {}),
-        ...(registration.description !== undefined
-          ? { description: registration.description }
-          : {}),
+        // Same nudge `decorateDefinitions` applies in the registry path — the
+        // caller-owned McpServer path must also tell agents to pass
+        // telemetry.intent, or sessions arrive with no intent (ARM-24).
+        description: appendTelemetryHint(registration.description),
         inputSchema: decoratedSchema,
       } as Parameters<typeof server.registerTool>[1],
       (async (...callbackArgs: unknown[]) => {
