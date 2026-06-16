@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.7
+
+### Record tool calls that return `isError: true` as failures
+
+Per MCP convention, a server signals a recoverable/upstream failure by returning a normal `CallToolResult` with `isError: true` (so the agent can see and retry it) rather than throwing. The recorder previously marked a tool call `ok: true` whenever the handler resolved without throwing — it never inspected the returned result — so every such failure was recorded as a success with `error: null`. Concretely, `notion-mcp` returns upstream Notion 4xx/5xx as `{ content: [{ type: "text", text: "Notion error (…)" }], isError: true }`; analytics recorded those as `ok=true`, leaving raw `error_count` blank and the session judge's `upstream_api_failure_count` at 0.
+
+Both instrumentation paths — `instrumentToolCall` (registry / `recorder.tool` / `attachToMcpServer`) and the `withMcpAnalytics` prototype-patch callback — now inspect the resolved result via a shared `deriveToolResultError` helper. When the result is an MCP error result (`isError === true`), the call is recorded with `status: "error"` and a human-readable message derived from the first text content item (falling back to a generic `"tool returned isError"` when no text is present). The original result is still returned to the caller **unchanged** — this only affects what telemetry records, never what the agent receives. A thrown handler still records an error exactly as before. The check is defensive about shape: a non-object, plain value, or missing `content` is treated as a success and never throws.
+
+No public API or type change. Added unit tests covering: a returned `isError` result records `ok=false` with the error text while the caller still gets the original result; a normal success still records `ok=true`; an `isError` result with no text falls back to a generic message; a throwing handler still records `ok=false`; and the same end-to-end through `withMcpAnalytics`.
+
 ## 0.6.5
 
 ### Stamp `is_workflow` on telemetry produced by Armature workflow runs

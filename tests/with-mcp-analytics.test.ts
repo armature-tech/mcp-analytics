@@ -153,6 +153,54 @@ test("withMcpAnalytics instruments the deprecated server.tool(...) overload (PRI
   }
 });
 
+test("withMcpAnalytics records a tool that returns isError as a failed call (not ok)", async () => {
+  const { batches, emit } = collectBatches();
+
+  const { result: server, recorder } = withMcpAnalytics(
+    {
+      armature: { delivery: "await", actorId: "iserror-actor", emit },
+    },
+    () => {
+      const s = new McpServer({ name: "iserror-server", version: "0.0.1" });
+      // Mirrors notion-mcp's dispatcher: an upstream failure is surfaced as a
+      // normal CallToolResult with isError:true rather than thrown.
+      s.registerTool(
+        "call_upstream",
+        { description: "Call upstream.", inputSchema: { id: z.string().min(1) } },
+        async () => ({
+          isError: true as const,
+          content: [{ type: "text" as const, text: "Notion error (404 not found)" }],
+        }),
+      );
+      return s;
+    },
+  );
+
+  const client = new Client({ name: "iserror-client", version: "0.0.1" });
+  const [st, ct] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+
+  try {
+    const callResult = await client.callTool({
+      name: "call_upstream",
+      arguments: { id: "page_1", telemetry: { intent: "fetch a page" } },
+    });
+    // The agent still sees the isError result, unchanged.
+    assert.equal(callResult.isError, true);
+
+    const toolCall = batches
+      .flatMap((b) => b.events)
+      .find((e) => e.kind === "tool_call");
+    assert.ok(toolCall);
+    assert.equal(toolCall?.ok, false);
+    assert.match(String(toolCall?.error), /Notion error \(404 not found\)/);
+  } finally {
+    await client.close();
+    await server.close();
+    await recorder.flush();
+  }
+});
+
 test("withMcpAnalytics instruments server.tool(name, cb) — no-schema overload", async () => {
   const { batches, emit } = collectBatches();
 

@@ -16,7 +16,7 @@ import {
   decorateInputSchemaWithTelemetry,
 } from "./schema.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
-import { isRecord } from "./utils.js";
+import { deriveToolResultError, isRecord } from "./utils.js";
 
 type WithAnalyticsContext = {
   config: McpAnalyticsConfig;
@@ -99,6 +99,10 @@ const wrapCallbackWithAnalytics = (
         ? await cb(args, maybeExtra)
         : await cb(maybeExtra ?? argsOrExtra);
 
+      // A returned MCP error result (`isError: true`) is a failed call even
+      // though the callback resolved; record it as an error while returning the
+      // original output to the caller untouched.
+      const resultError = deriveToolResultError(output);
       await recorder.recordToolCall({
         name,
         args,
@@ -107,8 +111,9 @@ const wrapCallbackWithAnalytics = (
         requestId,
         startedAt,
         durationMs: Date.now() - startedAtMs,
-        status: "ok",
-        result: output,
+        ...(resultError === undefined
+          ? { status: "ok" as const, result: output }
+          : { status: "error" as const, result: output, error: resultError }),
       });
 
       return output;

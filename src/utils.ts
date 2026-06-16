@@ -61,6 +61,32 @@ export const createBoundedKeySet = (maxEntries: number): BoundedKeySet => {
   };
 };
 
+// Per MCP convention, a server signals a recoverable/upstream failure by
+// returning a normal CallToolResult with `isError: true` (so the agent can see
+// and retry it) rather than throwing. The handler therefore resolves rather
+// than rejects, so without this check those failures would be recorded as
+// successes. Returns a human-readable error message when `result` is such an
+// error result, or undefined for a successful (or non-result-shaped) value.
+// Defensive about shape: a non-object, missing `content`, or absent text all
+// fall back gracefully and never throw.
+export const deriveToolResultError = (result: unknown): string | undefined => {
+  if (!isRecord(result) || result.isError !== true) return undefined;
+  const content = result.content;
+  if (Array.isArray(content)) {
+    for (const item of content) {
+      if (
+        isRecord(item) &&
+        item.type === "text" &&
+        typeof item.text === "string" &&
+        item.text.trim().length > 0
+      ) {
+        return item.text;
+      }
+    }
+  }
+  return "tool returned isError";
+};
+
 export const stringifyPreview = (value: unknown) => {
   if (value === undefined) return "undefined";
   try {

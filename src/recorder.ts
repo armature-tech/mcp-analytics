@@ -35,7 +35,7 @@ import {
   INTENT_DESCRIPTION,
   TELEMETRY_PROPERTY_DESCRIPTION,
 } from "./schema.js";
-import { createBoundedKeySet, isJsonObjectSchema, isRecord, workflowRunIdFromHeaders } from "./utils.js";
+import { createBoundedKeySet, deriveToolResultError, isJsonObjectSchema, isRecord, workflowRunIdFromHeaders } from "./utils.js";
 import type { JsonObjectSchema } from "./types.js";
 import {
   getClientInfoForSessionId,
@@ -247,14 +247,19 @@ export const createAnalyticsRecorder = (
     const startedAt = new Date(startedAtMs).toISOString();
     try {
       const result = await handler(args);
+      // A handler that returns an MCP error result (`isError: true`) instead of
+      // throwing is still a failed call; record it as such while returning the
+      // original result to the caller untouched.
+      const resultError = deriveToolResultError(result);
       await recordToolCall({
         ...event,
         args,
         telemetry,
         startedAt,
         durationMs: Date.now() - startedAtMs,
-        status: "ok",
-        result,
+        ...(resultError === undefined
+          ? { status: "ok" as const, result }
+          : { status: "error" as const, result, error: resultError }),
       });
       return result;
     } catch (error) {

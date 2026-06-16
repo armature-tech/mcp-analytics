@@ -469,6 +469,97 @@ test("recorder.tool returns the wrapped handler so it can be invoked directly", 
   assert.equal(toolCall?.metadata.intent, "via wrapped handler");
 });
 
+test("instrumentToolCall records a returned isError result as a failed call while returning it unchanged", async () => {
+  // Per MCP convention, servers surface recoverable/upstream failures as a
+  // normal CallToolResult with `isError: true` (so the agent can see/retry)
+  // rather than throwing. Those must be recorded as failures, not successes.
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: "actor-iserror",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  const errorResult = {
+    isError: true as const,
+    content: [{ type: "text" as const, text: "boom" }],
+  };
+
+  const result = await recorder.instrumentToolCall(
+    {
+      name: "lookup_customer",
+      args: { customer_id: "cus_x", telemetry: { intent: "lookup" } },
+      sessionId: "session_iserror",
+    },
+    async () => errorResult,
+  );
+
+  // The caller still receives the original result, untouched.
+  assert.equal(result, errorResult);
+
+  const events = batches.flatMap((batch) => batch.events);
+  const toolCall = events.find((event) => event.kind === "tool_call");
+  assert.ok(toolCall);
+  assert.equal(toolCall?.ok, false);
+  assert.match(String(toolCall?.error), /boom/);
+});
+
+test("instrumentToolCall records a normal successful result as ok", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: "actor-ok",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  await recorder.instrumentToolCall(
+    {
+      name: "lookup_customer",
+      args: { customer_id: "cus_ok" },
+      sessionId: "session_ok",
+    },
+    async () => ({ content: [{ type: "text" as const, text: "fine" }] }),
+  );
+
+  const events = batches.flatMap((batch) => batch.events);
+  const toolCall = events.find((event) => event.kind === "tool_call");
+  assert.ok(toolCall);
+  assert.equal(toolCall?.ok, true);
+  assert.equal(toolCall?.error, null);
+});
+
+test("instrumentToolCall with isError but no text content falls back to a generic error message", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: "actor-iserror-generic",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  await recorder.instrumentToolCall(
+    { name: "lookup_customer", args: {}, sessionId: "session_generic" },
+    async () => ({ isError: true as const }),
+  );
+
+  const events = batches.flatMap((batch) => batch.events);
+  const toolCall = events.find((event) => event.kind === "tool_call");
+  assert.ok(toolCall);
+  assert.equal(toolCall?.ok, false);
+  assert.match(String(toolCall?.error), /isError/);
+});
+
 test("instrumentToolCall records errors, rethrows, and still strips telemetry from the recorded input", async () => {
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = createAnalyticsRecorder({
