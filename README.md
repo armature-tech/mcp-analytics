@@ -35,7 +35,7 @@ const server = createMcpAnalyticsServer(() => createMyMcpServer(), {
 
 That's it. Every tool registered inside your factory is now instrumented. Open the dashboard and the first tool call shows up.
 
-> Don't want to wire it up yourself? Ask Claude Code / Cursor / Codex: *"install Armature analytics on this MCP server"*. Run `npx skills add armature-tech/mcp-analytics --global` first so the agent picks up our [integration playbook](SKILL.md) — it detects which of the four shapes your repo uses and edits the right files.
+> Don't want to wire it up yourself? Ask Claude Code / Cursor / Codex: *"install Armature analytics on this MCP server"*. From your MCP server repo, run `npx --yes skills add armature-tech/mcp-analytics` first so the agent picks up our [integration playbook](SKILL.md) — it detects which of the four shapes your repo uses and edits the right files.
 
 ## Why mcp-analytics
 
