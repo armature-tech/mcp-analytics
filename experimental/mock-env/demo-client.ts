@@ -1,9 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createMockAutumnMcpServer } from "./mock-autumn-mcp-server.js";
+import { createMockExampleMcpServer } from "./mock-example-mcp-server.js";
 
-const { server, autumn } = createMockAutumnMcpServer();
-const client = new Client({ name: "mock-autumn-demo-client", version: "0.0.0" });
+const { server, exampleMcp } = createMockExampleMcpServer();
+const client = new Client({ name: "mock-example-demo-client", version: "0.0.0" });
 const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
 await Promise.all([
@@ -27,8 +27,8 @@ try {
   console.log("\nTOOLS/CALL");
   console.log(JSON.stringify(toolCall, null, 2));
 
-  console.log("\nMOCK AUTUMN CALLS");
-  console.log(JSON.stringify(autumn.calls, null, 2));
+  console.log("\nMOCK EXAMPLE MCP CALLS");
+  console.log(JSON.stringify(exampleMcp.calls, null, 2));
 } finally {
   await client.close();
   await server.close();

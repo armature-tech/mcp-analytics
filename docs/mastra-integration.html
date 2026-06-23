@@ -269,7 +269,7 @@ new MCPServer({
 
 process.on("SIGTERM", () =&gt; analytics.flush());</code></pre>
   <p>For serverless deployments (per-request lambdas, Vercel, Workers, Mastra hosted on Hono
-    with <code>{ serverless: true }</code> — Autumn's setup), stay on <code>delivery: "await"</code>
+    with <code>{ serverless: true }</code> — the example service's setup), stay on <code>delivery: "await"</code>
     and you don't need a flush handle.</p>
 
   <h2>7. The full set of exports</h2>

@@ -2,23 +2,43 @@ name: Publish
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
 
 jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    if: github.repository == 'armature-tech/mcp-analytics'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check whether this commit is already released
+        id: existing_release
+        run: |
+          set -euo pipefail
+          tag="$(git tag --points-at HEAD --list 'v*' | sort -V | tail -1 || true)"
+          if [[ -n "${tag}" ]]; then
+            echo "Commit ${GITHUB_SHA} already has release tag ${tag}; skipping publish."
+            echo "published=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Setup Node
+        if: steps.existing_release.outputs.published != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -28,18 +48,95 @@ jobs:
           scope: "@armature-tech"
 
       - name: Install dependencies
+        if: steps.existing_release.outputs.published != 'true'
         run: npm ci
 
-      - name: Verify tag matches package version
+      - name: Run checks
+        if: steps.existing_release.outputs.published != 'true'
+        run: npm run check
+
+      - name: Build
+        if: steps.existing_release.outputs.published != 'true'
+        run: npm run build
+
+      - name: Resolve next patch version
+        if: steps.existing_release.outputs.published != 'true'
+        id: version
+        env:
+          VERSION_BASELINE: "0.6.6"
         run: |
-          TAG="${GITHUB_REF#refs/tags/v}"
-          PKG=$(node -p "require('./package.json').version")
-          if [ "$TAG" != "$PKG" ]; then
-            echo "Tag v$TAG does not match package.json version $PKG" >&2
-            exit 1
-          fi
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs");
+          const cp = require("node:child_process");
+
+          const pkgPath = "package.json";
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+          const versions = [process.env.VERSION_BASELINE];
+
+          function addVersion(candidate) {
+            if (typeof candidate !== "string") return;
+            const normalized = candidate.trim().replace(/^v/, "");
+            if (/^\d+\.\d+\.\d+$/.test(normalized)) versions.push(normalized);
+          }
+
+          try {
+            const output = cp.execFileSync("npm", ["view", pkg.name, "versions", "--json"], {
+              encoding: "utf8",
+              stdio: ["ignore", "pipe", "pipe"],
+            });
+            const parsed = JSON.parse(output);
+            if (Array.isArray(parsed)) parsed.forEach(addVersion);
+            else addVersion(parsed);
+          } catch (error) {
+            console.warn(`Could not read npm versions for ${pkg.name}: ${error.message}`);
+          }
+
+          try {
+            cp.execFileSync("git", ["fetch", "--tags", "--force"], { stdio: "ignore" });
+            const tags = cp.execFileSync("git", ["tag", "-l", "v*"], { encoding: "utf8" });
+            tags.split(/\r?\n/).forEach(addVersion);
+          } catch (error) {
+            console.warn(`Could not read git tags: ${error.message}`);
+          }
+
+          function parse(version) {
+            const [major, minor, patch] = version.split(".").map((part) => Number.parseInt(part, 10));
+            return { major, minor, patch, version };
+          }
+
+          versions.sort((a, b) => {
+            const left = parse(a);
+            const right = parse(b);
+            return left.major - right.major || left.minor - right.minor || left.patch - right.patch;
+          });
+
+          const highest = parse(versions.at(-1));
+          const nextVersion = `${highest.major}.${highest.minor}.${highest.patch + 1}`;
+          pkg.version = nextVersion;
+          fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `next_version=${nextVersion}\n`);
+          console.log(`Publishing ${pkg.name}@${nextVersion}`);
+          NODE
+
+      - name: Pack dry run
+        if: steps.existing_release.outputs.published != 'true'
+        run: npm pack --dry-run
 
       - name: Publish
-        run: npm publish --access public
+        if: steps.existing_release.outputs.published != 'true'
+        run: npm publish --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub release
+        if: steps.existing_release.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT_VERSION: ${{ steps.version.outputs.next_version }}
+        run: |
+          set -euo pipefail
+          gh release create "v${NEXT_VERSION}" \
+            --target "${GITHUB_SHA}" \
+            --title "v${NEXT_VERSION}" \
+            --notes "Published @armature-tech/mcp-analytics@${NEXT_VERSION} from ${GITHUB_SHA}."

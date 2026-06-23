@@ -4,23 +4,23 @@ import {
   type McpAnalyticsConfig,
 } from "../../src/index.js";
 import {
-  createMockAutumnClient,
-  createMockAutumnMcpServer,
-  type MockAutumnClient,
-} from "./mock-autumn-mcp-server.js";
+  createMockExampleClient,
+  createMockExampleMcpServer,
+  type MockExampleClient,
+} from "./mock-example-mcp-server.js";
 
-export const createInstrumentedMockAutumnMcpServer = (
-  autumn: MockAutumnClient = createMockAutumnClient(),
+export const createInstrumentedMockExampleMcpServer = (
+  exampleMcp: MockExampleClient = createMockExampleClient(),
   config?: McpAnalyticsConfig,
 ) => {
   return createMcpAnalyticsServer(
-    () => createMockAutumnMcpServer(autumn),
+    () => createMockExampleMcpServer(exampleMcp),
     config,
   );
 };
 
 export const main = async () => {
-  const { server } = createInstrumentedMockAutumnMcpServer();
+  const { server } = createInstrumentedMockExampleMcpServer();
   await server.connect(new StdioServerTransport());
 };
 

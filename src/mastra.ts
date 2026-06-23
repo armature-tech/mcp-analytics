@@ -199,7 +199,7 @@ const wrapOneTool = (
 };
 
 // Generic over the input map so the return value keeps the customer's exact
-// tool-map type (e.g. `Record<string, AutumnTool>`). Without this, every Mastra
+// tool-map type (e.g. `Record<string, HostTool>`). Without this, every Mastra
 // caller had to do `wrapMastraTools(myTools as unknown as MastraToolMap, ...) as
 // unknown as typeof myTools` because `MCPServer({ tools })` wants the narrower
 // type back. The `T extends MastraToolMap` constraint lets us still operate on

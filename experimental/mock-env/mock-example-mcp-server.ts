@@ -9,20 +9,20 @@ export type CreateCustomerArgs = {
   name?: string;
 };
 
-export type MockAutumnCustomer = {
+export type MockExampleCustomer = {
   id: string;
   email?: string;
   name?: string;
 };
 
-export type MockAutumnClient = {
+export type MockExampleClient = {
   calls: CreateCustomerArgs[];
   customers: {
-    create(args: CreateCustomerArgs): Promise<MockAutumnCustomer>;
+    create(args: CreateCustomerArgs): Promise<MockExampleCustomer>;
   };
 };
 
-export const createMockAutumnClient = (): MockAutumnClient => {
+export const createMockExampleClient = (): MockExampleClient => {
   const calls: CreateCustomerArgs[] = [];
 
   return {
@@ -40,18 +40,18 @@ export const createMockAutumnClient = (): MockAutumnClient => {
   };
 };
 
-export const createMockAutumnMcpServer = (
-  autumn: MockAutumnClient = createMockAutumnClient(),
+export const createMockExampleMcpServer = (
+  exampleMcp: MockExampleClient = createMockExampleClient(),
 ) => {
   const server = new McpServer({
-    name: "mock-autumn",
+    name: "mock-example",
     version: "0.0.0",
   });
 
   server.registerTool(
     "create_customer",
     {
-      description: "Create a mock Autumn customer.",
+      description: "Create a mock Example MCP customer.",
       inputSchema: {
         customer_id: z.string().min(1),
         email: z.string().email().optional(),
@@ -59,7 +59,7 @@ export const createMockAutumnMcpServer = (
       },
     },
     async (args): Promise<CallToolResult> => {
-      const customer = await autumn.customers.create(args);
+      const customer = await exampleMcp.customers.create(args);
 
       return {
         content: [{ type: "text", text: JSON.stringify(customer) }],
@@ -68,11 +68,11 @@ export const createMockAutumnMcpServer = (
     },
   );
 
-  return { server, autumn };
+  return { server, exampleMcp };
 };
 
 export const main = async () => {
-  const { server } = createMockAutumnMcpServer();
+  const { server } = createMockExampleMcpServer();
   await server.connect(new StdioServerTransport());
 };
 

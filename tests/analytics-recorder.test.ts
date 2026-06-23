@@ -641,12 +641,12 @@ test("recorder.createMcpServer round-trips a tool call through real MCP transpor
     const callResult = await client.callTool({
       name: "lookup_customer_note",
       arguments: {
-        customer: "Folk",
+        customer: "Demo Co",
         telemetry: { intent: "registry McpServer round trip" },
       },
     });
     const content = callResult.content as { text: string }[];
-    assert.equal(content[0]?.text, "noted: Folk");
+    assert.equal(content[0]?.text, "noted: Demo Co");
 
     const events = batches.flatMap((batch) => batch.events);
     const toolCall = events.find((event) => event.kind === "tool_call");
@@ -655,7 +655,7 @@ test("recorder.createMcpServer round-trips a tool call through real MCP transpor
     assert.equal(toolCall?.metadata.tool_name, "lookup_customer_note");
     assert.equal(toolCall?.metadata.intent, "registry McpServer round trip");
     const inputPreview = JSON.parse(toolCall?.metadata.input_preview as string);
-    assert.deepEqual(inputPreview, { customer: "Folk" });
+    assert.deepEqual(inputPreview, { customer: "Demo Co" });
   } finally {
     await client.close();
     await server.close();

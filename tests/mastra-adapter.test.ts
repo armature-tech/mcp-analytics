@@ -338,10 +338,10 @@ const createTool = <TInput, TOutput>(
 ): MastraCreatedTool<TInput, TOutput> => def;
 
 test("wrapMastraTools preserves the input tool-map type (no `as unknown as MastraToolMap` cast needed)", () => {
-  // Mirrors Autumn's `createRawAutumnOperationTools()` shape: a narrowly-typed
+  // Mirrors the example service's `createRawExampleOperationTools()` shape: a narrowly-typed
   // `Record<string, MastraCreatedTool<TIn, TOut>>` that previous Mastra
   // integrators had to launder through `MastraToolMap` in both directions.
-  const createRawAutumnOperationTools = () => ({
+  const createRawExampleOperationTools = () => ({
     lookup_customer: createTool({
       id: "lookup_customer",
       description: "Look up a customer.",
@@ -356,15 +356,15 @@ test("wrapMastraTools preserves the input tool-map type (no `as unknown as Mastr
     }),
   });
 
-  type AutumnTools = ReturnType<typeof createRawAutumnOperationTools>;
-  const wrapped: AutumnTools = wrapMastraTools(createRawAutumnOperationTools(), {
+  type ExampleTools = ReturnType<typeof createRawExampleOperationTools>;
+  const wrapped: ExampleTools = wrapMastraTools(createRawExampleOperationTools(), {
     armature: { delivery: "await" },
   });
 
   // Each key on the input map is preserved on the output map at the type level —
   // if wrapMastraTools regressed to returning `MastraToolMap`, these property
   // reads against the narrowed-back type would still compile but the explicit
-  // `: AutumnTools` annotation above would fail typecheck.
+  // `: ExampleTools` annotation above would fail typecheck.
   assert.ok(wrapped.lookup_customer);
   assert.ok(wrapped.create_invoice);
 });
@@ -402,8 +402,8 @@ test("Mastra-shaped tool with narrower context assigns into wrapMastraTools with
 // assignable to `MastraToolMap` because the private brand makes the class
 // non-structural — index signatures require all properties of the source
 // type to satisfy the signature's value type, which a `#brand` field can't.
-// Autumn was forced to write `wrapMastraTools(createRawAutumnOperationTools()
-// as unknown as MastraToolMap, ...) as unknown as AutumnOperationTools`.
+// Example MCP was forced to write `wrapMastraTools(createRawExampleOperationTools()
+// as unknown as MastraToolMap, ...) as unknown as ExampleOperationTools`.
 class MastraToolClassFixture<TInput, TOutput> {
   // `#brand` is the load-bearing detail — it's what makes the class instance
   // non-structural in TypeScript's eyes, the same way `@mastra/core/tools`
@@ -435,13 +435,13 @@ test("Mastra-Tool-class-shaped registry (with #private brand) assigns into wrapM
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = makeRecorder(batches);
 
-  // Exact Autumn call-site shape: a factory that returns a `Record<string, Tool>`
+  // Exact Example MCP call-site shape: a factory that returns a `Record<string, Tool>`
   // where `Tool` is a class instance with a #private brand. Pre-fix this required
-  //   wrapMastraTools(createRawAutumnOperationTools() as unknown as MastraToolMap, ...)
-  //     as unknown as AutumnOperationTools
+  //   wrapMastraTools(createRawExampleOperationTools() as unknown as MastraToolMap, ...)
+  //     as unknown as ExampleOperationTools
   // because the `[key: string]: unknown` index signature on the old MastraTool
   // rejected the class instance.
-  const createRawAutumnOperationTools = () => ({
+  const createRawExampleOperationTools = () => ({
     lookup_customer: createMastraToolClassFixture({
       id: "lookup_customer",
       description: "Look up a customer.",
@@ -456,14 +456,14 @@ test("Mastra-Tool-class-shaped registry (with #private brand) assigns into wrapM
     }),
   });
 
-  type AutumnOperationTools = ReturnType<typeof createRawAutumnOperationTools>;
+  type ExampleOperationTools = ReturnType<typeof createRawExampleOperationTools>;
 
   // The ONE assertion: this call has to typecheck with no cast on the input or
-  // the return value. The `: AutumnOperationTools` annotation locks in the
+  // the return value. The `: ExampleOperationTools` annotation locks in the
   // return-type preservation; if `wrapMastraTools` regresses to returning
   // `MastraToolMap`, the annotation breaks `tsc --noEmit -p tsconfig.test.json`.
-  const wrapped: AutumnOperationTools = wrapMastraToolsWithRecorder(
-    createRawAutumnOperationTools(),
+  const wrapped: ExampleOperationTools = wrapMastraToolsWithRecorder(
+    createRawExampleOperationTools(),
     recorder,
   );
 
@@ -494,7 +494,7 @@ test("Mastra-Tool-class-shaped registry (with #private brand) assigns into wrapM
 });
 
 test("wrapMastraTools decorates a zod/v4 strict object inputSchema without mixing namespaces", async () => {
-  // Mirrors Autumn's tool shape: `z.object({ request: schema }).strict()` from zod/v4.
+  // Mirrors the example service's tool shape: `z.object({ request: schema }).strict()` from zod/v4.
   // The SDK historically detected this as a v3 object and extended it with a v3 telemetry
   // schema, which silently registered but threw "expected a Zod schema" on every parse.
   const batches: AnalyticsIngestBatch[] = [];

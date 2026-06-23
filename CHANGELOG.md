@@ -63,15 +63,15 @@ Regression tests assert that two tool calls sharing the same `extra.requestId` (
 
 ```ts
 tools: wrapMastraTools(
-  createRawAutumnOperationTools() as unknown as MastraToolMap,
+  createRawExampleOperationTools() as unknown as MastraToolMap,
   { armature: { delivery: "await" } },
-) as unknown as AutumnOperationTools,
+) as unknown as ExampleOperationTools,
 ```
 
-The integrator-side cast is now gone. `MastraTool` is a closed object type (no index signature) listing only the optional fields the adapter actually reads (`id`, `description`, `inputSchema`, `outputSchema`, `annotations`, `execute`). Mastra's `Tool<...>` class instance satisfies the constraint structurally, and the existing `<T extends MastraToolMap>(tools: T) => T` generic preserves the caller's narrow type end-to-end so the result drops straight into `new MCPServer({ tools })`. Autumn-style call sites compile as:
+The integrator-side cast is now gone. `MastraTool` is a closed object type (no index signature) listing only the optional fields the adapter actually reads (`id`, `description`, `inputSchema`, `outputSchema`, `annotations`, `execute`). Mastra's `Tool<...>` class instance satisfies the constraint structurally, and the existing `<T extends MastraToolMap>(tools: T) => T` generic preserves the caller's narrow type end-to-end so the result drops straight into `new MCPServer({ tools })`. host-style call sites compile as:
 
 ```ts
-tools: wrapMastraTools(createRawAutumnOperationTools(), {
+tools: wrapMastraTools(createRawExampleOperationTools(), {
   armature: { delivery: "await" },
 })
 ```
@@ -82,7 +82,7 @@ Runtime behavior is unchanged: schema decoration, telemetry stripping, default `
 
 ## 0.6.0
 
-Drops the integration boilerplate every Mastra adopter (e.g. Autumn) had been writing around `wrapMastraTools`, adds a `instrumentMcpServerTools` helper for servers that can't use `createMcpAnalyticsServer`'s prototype-patching path, and broadens the default actor-seed resolution to cover two more common auth field names.
+Drops the integration boilerplate every Mastra adopter (e.g. Example MCP) had been writing around `wrapMastraTools`, adds a `instrumentMcpServerTools` helper for servers that can't use `createMcpAnalyticsServer`'s prototype-patching path, and broadens the default actor-seed resolution to cover two more common auth field names.
 
 ### Mastra adapter: auto-extract standard MCP context
 
@@ -90,11 +90,11 @@ Drops the integration boilerplate every Mastra adopter (e.g. Autumn) had been wr
 
 ### Actor-seed aliases: `apiKey`, `principalId`
 
-`resolveActorSeed` now also recognises `authInfo.apiKey` and `authInfo.principalId` as actor-seed inputs (alongside the existing `token` and `clientId`). Hosts whose auth shim exposes credentials under those names — Autumn is one — no longer need a custom `actorId` resolver just to map between the two. `RequestExtra.authInfo` gained the two optional fields to match.
+`resolveActorSeed` now also recognises `authInfo.apiKey` and `authInfo.principalId` as actor-seed inputs (alongside the existing `token` and `clientId`). Hosts whose auth shim exposes credentials under those names — Example MCP is one — no longer need a custom `actorId` resolver just to map between the two. `RequestExtra.authInfo` gained the two optional fields to match.
 
 ### Mastra adapter: generic over the input tool-map type
 
-`wrapMastraTools`, `wrapMastraToolsWithRecorder`, and `MastraAnalytics.wrapTools` are now `<T extends MastraToolMap>(tools: T) => T`. An Autumn-style `Record<string, MastraCreatedTool<...>>` round-trips through them without needing `as unknown as MastraToolMap` casts at the call site or on the return — the customer's narrow tool-map type is preserved end-to-end so the result drops straight into `new MCPServer({ tools })`.
+`wrapMastraTools`, `wrapMastraToolsWithRecorder`, and `MastraAnalytics.wrapTools` are now `<T extends MastraToolMap>(tools: T) => T`. An host-style `Record<string, MastraCreatedTool<...>>` round-trips through them without needing `as unknown as MastraToolMap` casts at the call site or on the return — the customer's narrow tool-map type is preserved end-to-end so the result drops straight into `new MCPServer({ tools })`.
 
 ### New entry point: `instrumentMcpServerTools`
 
@@ -129,7 +129,7 @@ Telemetry schema shape is Armature-owned. Removed the `telemetry` field from the
 
 ### Mastra adapter: decorate zod/v4 inputSchemas with a v4 telemetry block
 
-Hosts using zod/v4 (e.g. Autumn's `packages/mcp`) declare tool inputs as
+Hosts using zod/v4 (e.g. the example service's `packages/mcp`) declare tool inputs as
 `zv4.object({ request: schema }).strict()`. The Mastra adapter detected these as v3
 `ZodObject`s (both have `.shape` and `.extend`) and extended them with a v3 telemetry
 block. `.extend()` accepted the cross-version shape silently, then every `.parse()` threw
@@ -142,7 +142,7 @@ builds the telemetry block from the matching namespace.
 ### README rewrite
 
 Restructured to lead with the value proposition and a single drop-in example, modeled on
-[useautumn/autumn](https://github.com/useautumn/autumn)'s README. The four parallel
+[example-org/example-mcp](https://github.com/example-org/example-mcp)'s README. The four parallel
 quick-starts collapsed into one primary shape (`createMcpAnalyticsServer`) plus a short
 pointer to [`SKILL.md`](SKILL.md) for the registry / dispatcher / Mastra alternatives.
 No API changes.

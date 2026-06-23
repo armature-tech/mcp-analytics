@@ -70,12 +70,12 @@ test("withMcpAnalytics instruments server.registerTool calls end-to-end", async 
     const callResult = await client.callTool({
       name: "lookup_customer",
       arguments: {
-        customer: "Folk",
+        customer: "Demo Co",
         telemetry: { intent: "registerTool round trip" },
       },
     });
     const content = callResult.content as { text: string }[];
-    assert.equal(content[0]?.text, "noted: Folk");
+    assert.equal(content[0]?.text, "noted: Demo Co");
 
     const toolCall = batches
       .flatMap((b) => b.events)
@@ -133,12 +133,12 @@ test("withMcpAnalytics instruments the deprecated server.tool(...) overload (PRI
     const callResult = await client.callTool({
       name: "lookup_customer",
       arguments: {
-        customer: "Folk",
+        customer: "Demo Co",
         telemetry: { intent: "deprecated overload round trip" },
       },
     });
     const content = callResult.content as { text: string }[];
-    assert.equal(content[0]?.text, "noted: Folk");
+    assert.equal(content[0]?.text, "noted: Demo Co");
 
     const toolCall = batches
       .flatMap((b) => b.events)

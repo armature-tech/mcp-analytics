@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { defaultMcpAnalyticsConfig } from "../../src/index.js";
-import { createInstrumentedMockAutumnMcpServer } from "./instrumented-mock-autumn-mcp-server.js";
+import { createInstrumentedMockExampleMcpServer } from "./instrumented-mock-example-mcp-server.js";
 import { createMockArmatureServer } from "./mock-armature-server.js";
 
 const delay = async (ms: number) => {
@@ -34,7 +34,7 @@ await new Promise<void>((resolve) => {
 const armatureAddress = armatureServer.address() as AddressInfo;
 const armatureTelemetryUrl = `http://127.0.0.1:${armatureAddress.port}/telemetry`;
 
-const { server, autumn } = createInstrumentedMockAutumnMcpServer(undefined, {
+const { server, exampleMcp } = createInstrumentedMockExampleMcpServer(undefined, {
   ...defaultMcpAnalyticsConfig,
   armature: {
     ...defaultMcpAnalyticsConfig.armature,
@@ -43,7 +43,7 @@ const { server, autumn } = createInstrumentedMockAutumnMcpServer(undefined, {
   },
 });
 const client = new Client({
-  name: "instrumented-mock-autumn-demo-client",
+  name: "instrumented-mock-example-demo-client",
   version: "0.0.0",
 });
 const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -65,8 +65,8 @@ try {
       email: "alice@example.com",
       name: "Alice",
       telemetry: {
-        intent: "Create a customer in the mock Autumn system.",
-        context: "Exercise the wrapped mock Autumn MCP through the ingest batch format.",
+        intent: "Create a customer in the mock Example MCP system.",
+        context: "Exercise the wrapped mock Example MCP through the ingest batch format.",
         frustration_level: "low",
       },
     },
@@ -74,10 +74,10 @@ try {
   console.log("\nINSTRUMENTED TOOLS/CALL");
   console.log(JSON.stringify(toolCall, null, 2));
 
-  console.log("\nMOCK AUTUMN CALLS");
-  console.log(JSON.stringify(autumn.calls, null, 2));
+  console.log("\nMOCK EXAMPLE MCP CALLS");
+  console.log(JSON.stringify(exampleMcp.calls, null, 2));
 
-  assert.deepStrictEqual(autumn.calls, [
+  assert.deepStrictEqual(exampleMcp.calls, [
     {
       customer_id: "cus_1",
       email: "alice@example.com",
@@ -96,8 +96,8 @@ try {
   assert.equal(event?.kind, "tool_call");
   assert.equal(event?.ok, true);
   assert.equal((event?.metadata as Record<string, unknown>)?.tool_name, "create_customer");
-  assert.equal((event?.metadata as Record<string, unknown>)?.intent, "Create a customer in the mock Autumn system.");
-  assert.equal((event?.metadata as Record<string, unknown>)?.context, "Exercise the wrapped mock Autumn MCP through the ingest batch format.");
+  assert.equal((event?.metadata as Record<string, unknown>)?.intent, "Create a customer in the mock Example MCP system.");
+  assert.equal((event?.metadata as Record<string, unknown>)?.context, "Exercise the wrapped mock Example MCP through the ingest batch format.");
   assert.equal((event?.metadata as Record<string, unknown>)?.frustration_level, "low");
   assert.match(String((event?.metadata as Record<string, unknown>)?.input_preview), /cus_1/);
   assert.match(String(event?.result_preview), /alice@example.com/);

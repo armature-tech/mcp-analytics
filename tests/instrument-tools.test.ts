@@ -93,12 +93,12 @@ test("instrumentMcpServerTools registers tools on a caller-owned McpServer end-t
     const callResult = await client.callTool({
       name: "lookup_customer",
       arguments: {
-        customer: "Folk",
+        customer: "Demo Co",
         telemetry: { intent: "instrument round trip" },
       },
     });
     const content = callResult.content as { text: string }[];
-    assert.equal(content[0]?.text, "noted: Folk");
+    assert.equal(content[0]?.text, "noted: Demo Co");
 
     const toolCall = batches
       .flatMap((b) => b.events)
@@ -109,7 +109,7 @@ test("instrumentMcpServerTools registers tools on a caller-owned McpServer end-t
     // Telemetry was stripped before the handler ran (the input_preview echoes
     // what the handler saw, not what came over the wire).
     const inputPreview = JSON.parse(toolCall?.metadata.input_preview as string);
-    assert.deepEqual(inputPreview, { customer: "Folk" });
+    assert.deepEqual(inputPreview, { customer: "Demo Co" });
   } finally {
     await client.close();
     await server.close();
