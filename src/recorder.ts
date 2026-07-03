@@ -35,8 +35,9 @@ import {
   INTENT_DESCRIPTION,
   TELEMETRY_PROPERTY_DESCRIPTION,
 } from "./schema.js";
-import { createBoundedKeySet, deriveToolResultError, isJsonObjectSchema, isRecord, workflowRunIdFromHeaders } from "./utils.js";
-import type { JsonObjectSchema } from "./types.js";
+import { createBoundedKeySet, deriveToolResultError, headerValue, isJsonObjectSchema, isRecord, workflowRunIdFromHeaders } from "./utils.js";
+import type { HeaderBag, JsonObjectSchema } from "./types.js";
+import { processScopedSessionId } from "./stdio-session.js";
 import {
   getClientInfoForSessionId,
   installClientInfoCapture,
@@ -131,8 +132,32 @@ export const createAnalyticsRecorder = (
       ?? workflowRunIdFromHeaders(event.headers ?? event.extra?.requestInfo?.headers);
   };
 
+  // Session id, in falling priority: explicit event/extra value, transport
+  // `Mcp-Session-Id` header, then — only for requests with no HTTP headers at
+  // all (stdio, in-process) — the process-scoped fallback. Stdio transports
+  // never carry a session id, and events shipped with `session_id_hint: null`
+  // get bucketed per-actor-per-day at ingest, merging distinct CLI
+  // conversations into one activity (see stdio-session.ts). Requests that DO
+  // carry headers are excluded from the fallback: many sessions share a
+  // long-lived HTTP server process, so the absence of a session id there must
+  // stay visible to ingest instead of being glued to one process id.
+  const resolveSessionId = (event: {
+    sessionId?: string;
+    extra?: RequestExtra;
+    headers?: HeaderBag;
+  }): string | undefined => {
+    const normalized = normalizeSessionId(event.sessionId, event.extra);
+    if (normalized) return normalized;
+    const headers = event.headers ?? event.extra?.requestInfo?.headers;
+    // Loose == null: an explicit `headers: null` from an untyped JS caller
+    // means the same as absent — there is no HTTP request.
+    if (headers == null) return processScopedSessionId();
+    const fromHeaders = headerValue(headers, "mcp-session-id")?.trim();
+    return fromHeaders ? fromHeaders : undefined;
+  };
+
   const recordSessionInit = async (event: RecordSessionInitEvent) => {
-    const sessionId = normalizeSessionId(event.sessionId, event.extra);
+    const sessionId = resolveSessionId(event);
     if (!sessionId) return;
 
     const context = await analyticsContextFor({
@@ -182,7 +207,7 @@ export const createAnalyticsRecorder = (
       finishedAtMs,
     });
     const requestId = normalizeRequestId(event.requestId);
-    const sessionId = normalizeSessionId(event.sessionId, event.extra);
+    const sessionId = resolveSessionId(event);
     const errorMessage = event.error === undefined
       ? undefined
       : event.error instanceof Error

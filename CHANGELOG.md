@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.8
+
+### Give stdio sessions a real session id (fixes distinct CLI conversations merging into one activity)
+
+stdio MCP servers — the transport `claude -p` and other CLI clients use — never see a session id: `StdioServerTransport.sessionId` stays undefined and there is no HTTP request, so every event shipped with `session_id_hint: null` and no `session_init` was ever emitted. Armature's ingest groups null-hint events into a coarse per-actor **daily** bucket, so two distinct same-day CLI conversations from the same user were merged into a single activity.
+
+A stdio server process is spawned by its client and serves exactly one connection for its whole lifetime, so process identity is session identity. The recorder now falls back to a lazily minted **process-scoped session id** (`stdio-<uuid>`) whenever a request carries no session signal and no HTTP headers at all. Consequences: stdio events carry a stable, per-conversation `session_id_hint`; a `session_init` is emitted once per stdio session; and the initialize-handshake `clientInfo` is cached under the same id, so the dashboard's Client column resolves for CLI sessions (e.g. `claude-code`).
+
+Requests that DO carry HTTP headers are deliberately excluded from the fallback — many sessions share one long-lived HTTP server process, so their missing session id stays `null` and ingest keeps bucketing them server-side. As a smaller addition, an `Mcp-Session-Id` header passed via the event-level `headers` field (not just `extra.requestInfo.headers`) now also resolves as the session id. The fallback id's `stdio-` prefix intentionally does not match the stateless-HTTP `mcp_<name>_v_<version>_<uuid>` shape, so it can never be misparsed as an identity-bearing id.
+
+The same fix ships in the Python SDK (`armature-mcp-analytics`), where the FastMCP adapter additionally pulls request headers from `fastmcp.server.dependencies.get_http_headers(include={"mcp-session-id"})` — the `include` opt-in matters because fastmcp strips `Mcp-Session-Id` by default. HTTP FastMCP deployments are thereby both excluded from the stdio fallback AND get real per-session ids for the first time (previously all their events shipped null hints).
+
+Known limit: a resumed CLI conversation (`claude -p --resume`) spawns a new process and therefore starts a new analytics session — stdio offers no durable cross-process session identity.
+
 ## 0.6.7
 
 ### Record tool calls that return `isError: true` as failures

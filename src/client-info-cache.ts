@@ -1,6 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { HeaderBag, McpClientInfo } from "./types.js";
 import { headerValue, isRecord } from "./utils.js";
+import { processScopedSessionId } from "./stdio-session.js";
 
 // In-process map keyed by session id (transport sessionId and/or the
 // `Mcp-Session-Id` request header). Populated by the patched
@@ -82,7 +83,13 @@ const captureClientInfoFromInitialize = (
   if (server.transport?.sessionId) sessionIds.add(server.transport.sessionId);
   if (headerSessionId) sessionIds.add(headerSessionId);
   if (params._meta?.sessionId) sessionIds.add(params._meta.sessionId);
-  if (sessionIds.size === 0) return;
+  if (sessionIds.size === 0) {
+    // No session key anywhere — a stdio/in-process handshake. The recorder
+    // resolves the same process-scoped fallback id for every event on this
+    // connection (see stdio-session.ts), so cache the identity under it to
+    // keep the dashboard's Client column populated for CLI sessions.
+    sessionIds.add(processScopedSessionId());
+  }
 
   const clientInfo: McpClientInfo = {
     name,
