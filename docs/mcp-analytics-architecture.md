@@ -50,10 +50,10 @@ sequenceDiagram
   Agent->>MCP: tools/list
   MCP-->>Agent: Example MCP tools include telemetry
 
-  Agent->>MCP: tools/call<br/>example args + telemetry.intent
+  Agent->>MCP: tools/call<br/>example args + telemetry.user_intent
 
   MCP->>SDK: wrapped handler
-  SDK->>SDK: split args<br/>telemetry.intent vs example args
+  SDK->>SDK: split args<br/>telemetry.user_intent vs example args
   Note over SDK,ExampleCode: telemetry is never passed to Example MCP
 
   SDK->>ExampleCode: original handler<br/>stripped example args only
@@ -78,7 +78,10 @@ Agent sees:
   email?: string,
   name?: string,
   telemetry: {
-    intent: string
+    user_turn?: number,
+    user_intent: string,
+    agent_thinking?: string,
+    user_frustration?: "low" | "medium" | "high"
   }
 }
 ```
@@ -88,7 +91,7 @@ Analytics SDK extracts:
 ```ts
 {
   telemetry: {
-    intent: string
+    user_intent: string
   },
   exampleArgs: {
     customer_id: string,
@@ -108,7 +111,7 @@ Original example handler receives:
 }
 ```
 
-The example service receives only the original example-compatible args. It never receives `telemetry`, `intent`, or agent metadata.
+The example service receives only the original example-compatible args. It never receives `telemetry`, `user_intent`, or agent metadata.
 
 Armature receives the analytics payload asynchronously:
 
@@ -118,7 +121,7 @@ Armature receives the analytics payload asynchronously:
   request_id: string,
   tool_name: "create_customer",
   telemetry: {
-    intent: string
+    user_intent: string
   },
   input: {
     customer_id: string,
@@ -145,7 +148,7 @@ const server = createMcpAnalyticsServer(
 
 - Telemetry is added at declaration time, before agents call `tools/list`.
 - Telemetry is removed at execution time, before the original example handler runs.
-- `intent` is analytics-only data; it must never be passed to Example MCP handlers or example APIs.
+- `user_intent` is analytics-only data; it must never be passed to Example MCP handlers or example APIs.
 - Example MCP server code remains the owner of example service behavior.
 - The SDK never calls Example MCP directly.
 - Telemetry emission is scheduled with `setImmediate` after the tool result is returned and must not block the tool call.

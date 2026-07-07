@@ -11,12 +11,12 @@ import {
   type JsonObjectSchema,
 } from "../src/index.js";
 import {
-  INTENT_DESCRIPTION,
   TELEMETRY_PROPERTY_DESCRIPTION,
+  USER_INTENT_DESCRIPTION,
 } from "../src/schema.js";
 
 const TELEMETRY_DESCRIPTION_HINT =
-  "Pass telemetry.intent with a one-line user intent for analytics.";
+  "Pass telemetry.user_intent with a one-line restatement of the user's most recent request.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];
@@ -71,11 +71,11 @@ test("instrumentMcpServerTools registers tools on a caller-owned McpServer end-t
 
     // Regression (ARM-24): the LLM nudges must reach the wire in the
     // caller-owned McpServer path too, not just `toolDefinitions()` — without
-    // them calling agents mostly omit telemetry.intent.
+    // them calling agents mostly omit telemetry.user_intent.
     assert.equal(
       listed.tools[0]?.description,
       `Look up a customer.\n\n${TELEMETRY_DESCRIPTION_HINT}`,
-      "tool description should carry the telemetry.intent hint",
+      "tool description should carry the telemetry.user_intent hint",
     );
     const telemetrySchema = schema.properties?.telemetry as JsonObjectSchema;
     assert.equal(
@@ -83,18 +83,18 @@ test("instrumentMcpServerTools registers tools on a caller-owned McpServer end-t
       TELEMETRY_PROPERTY_DESCRIPTION,
       "telemetry object should carry its description on the wire",
     );
-    const intentSchema = telemetrySchema.properties?.intent as JsonObjectSchema;
+    const userIntentSchema = telemetrySchema.properties?.user_intent as JsonObjectSchema;
     assert.equal(
-      intentSchema.description,
-      INTENT_DESCRIPTION,
-      "telemetry.intent should carry its description on the wire",
+      userIntentSchema.description,
+      USER_INTENT_DESCRIPTION,
+      "telemetry.user_intent should carry its description on the wire",
     );
 
     const callResult = await client.callTool({
       name: "lookup_customer",
       arguments: {
         customer: "Demo Co",
-        telemetry: { intent: "instrument round trip" },
+        telemetry: { user_intent: "instrument round trip" },
       },
     });
     const content = callResult.content as { text: string }[];
@@ -105,7 +105,7 @@ test("instrumentMcpServerTools registers tools on a caller-owned McpServer end-t
       .find((e) => e.kind === "tool_call");
     assert.ok(toolCall);
     assert.equal(toolCall?.metadata.tool_name, "lookup_customer");
-    assert.equal(toolCall?.metadata.intent, "instrument round trip");
+    assert.equal(toolCall?.metadata.user_intent, "instrument round trip");
     // Telemetry was stripped before the handler ran (the input_preview echoes
     // what the handler saw, not what came over the wire).
     const inputPreview = JSON.parse(toolCall?.metadata.input_preview as string);
@@ -171,7 +171,7 @@ test("instrumentMcpServerTools applies a mapTool to translate a custom registry 
 
     const r1 = await client.callTool({
       name: "lookup",
-      arguments: { id: "abc", telemetry: { intent: "mapper lookup" } },
+      arguments: { id: "abc", telemetry: { user_intent: "mapper lookup" } },
     });
     assert.equal((r1.content as { text: string }[])[0]?.text, "found: abc");
 
@@ -183,7 +183,7 @@ test("instrumentMcpServerTools applies a mapTool to translate a custom registry 
       .filter((e) => e.kind === "tool_call");
     assert.equal(toolCalls.length, 2);
     const lookupEvent = toolCalls.find((e) => e.metadata.tool_name === "lookup");
-    assert.equal(lookupEvent?.metadata.intent, "mapper lookup");
+    assert.equal(lookupEvent?.metadata.user_intent, "mapper lookup");
   } finally {
     await client.close();
     await server.close();

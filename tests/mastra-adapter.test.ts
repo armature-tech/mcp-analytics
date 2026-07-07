@@ -39,11 +39,11 @@ test("wrapMastraTools decorates Zod inputSchema with the telemetry block", () =>
 
   const parsed = decorated.parse({
     customer_id: "cus_1",
-    telemetry: { intent: "look up account" },
+    telemetry: { user_intent: "look up account" },
   });
   assert.deepEqual(parsed, {
     customer_id: "cus_1",
-    telemetry: { intent: "look up account" },
+    telemetry: { user_intent: "look up account" },
   });
 });
 
@@ -61,11 +61,11 @@ test("wrapMastraTools preserves id and unrelated tool properties, nudges the des
 
   const wrapped = wrapMastraTools(tools);
   assert.equal(wrapped.echo?.id, "echo");
-  // The description keeps its original text and gains the telemetry.intent
+  // The description keeps its original text and gains the telemetry.user_intent
   // nudge (ARM-24), like every other integration shape.
   assert.equal(
     wrapped.echo?.description,
-    "Echo back.\n\nPass telemetry.intent with a one-line user intent for analytics.",
+    "Echo back.\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request.",
   );
   assert.equal(wrapped.echo?.annotations, annotations);
   assert.notEqual(wrapped.echo?.execute, tools.echo?.execute);
@@ -91,7 +91,7 @@ test("wrapped execute strips telemetry from input before calling the original ha
   const wrapped = wrapMastraToolsWithRecorder(tools, recorder);
   const result = await wrapped.lookup_customer?.execute?.({
     customer_id: "cus_42",
-    telemetry: { intent: "look up account" },
+    telemetry: { user_intent: "look up account" },
   });
 
   assert.deepEqual(receivedInput, { customer_id: "cus_42" });
@@ -101,7 +101,7 @@ test("wrapped execute strips telemetry from input before calling the original ha
   const toolCall = events.find((event) => event.kind === "tool_call");
   assert.ok(toolCall);
   assert.equal(toolCall?.metadata.tool_name, "lookup_customer");
-  assert.equal(toolCall?.metadata.intent, "look up account");
+  assert.equal(toolCall?.metadata.user_intent, "look up account");
   assert.equal(toolCall?.ok, true);
   const inputPreview = JSON.parse(toolCall?.metadata.input_preview as string);
   assert.deepEqual(inputPreview, { customer_id: "cus_42" });
@@ -126,7 +126,7 @@ test("wrapped execute records errors and rethrows", async () => {
     () =>
       wrapped.boom?.execute?.({
         id: "x",
-        telemetry: { intent: "trigger error" },
+        telemetry: { user_intent: "trigger error" },
       }) as Promise<unknown>,
     /kaboom/,
   );
@@ -136,7 +136,7 @@ test("wrapped execute records errors and rethrows", async () => {
   assert.ok(toolCall);
   assert.equal(toolCall?.ok, false);
   assert.equal(toolCall?.error, "kaboom");
-  assert.equal(toolCall?.metadata.intent, "trigger error");
+  assert.equal(toolCall?.metadata.user_intent, "trigger error");
 });
 
 test("resolveExtra propagates sessionId and authInfo into the recorded event", async () => {
@@ -162,7 +162,7 @@ test("resolveExtra propagates sessionId and authInfo into the recorded event", a
   });
 
   await wrapped.echo?.execute?.(
-    { msg: "hi", telemetry: { intent: "say hi" } },
+    { msg: "hi", telemetry: { user_intent: "say hi" } },
     { sessionId: "session-mastra-1", userId: "user-7" },
   );
 
@@ -479,7 +479,7 @@ test("Mastra-Tool-class-shaped registry (with #private brand) assigns into wrapM
       // We pass it as a loose cast because the class fixture's input type
       // doesn't include the SDK-injected telemetry block — that's exactly the
       // shape Mastra emits when the agent populates it.
-      ...({ telemetry: { intent: "class-fixture lookup" } } as object),
+      ...({ telemetry: { user_intent: "class-fixture lookup" } } as object),
     } as { customer_id: string },
     { mcp: { extra: { sessionId: "sess-class-1" } } },
   );
@@ -489,7 +489,7 @@ test("Mastra-Tool-class-shaped registry (with #private brand) assigns into wrapM
   const toolCall = events.find((event) => event.kind === "tool_call");
   assert.ok(toolCall);
   assert.equal(toolCall?.metadata.tool_name, "lookup_customer");
-  assert.equal(toolCall?.metadata.intent, "class-fixture lookup");
+  assert.equal(toolCall?.metadata.user_intent, "class-fixture lookup");
   assert.equal(toolCall?.session_id_hint, "sess-class-1");
 });
 
@@ -519,24 +519,24 @@ test("wrapMastraTools decorates a zod/v4 strict object inputSchema without mixin
   // Now the v4 path is taken and telemetry parses cleanly with its inner fields optional.
   const parsed = schema.parse({
     request: { customer_id: "cus_2" },
-    telemetry: { intent: "look up account" },
+    telemetry: { user_intent: "look up account" },
   });
   assert.deepEqual(parsed, {
     request: { customer_id: "cus_2" },
-    telemetry: { intent: "look up account" },
+    telemetry: { user_intent: "look up account" },
   });
 
   // End-to-end: the wrapped execute strips telemetry and emits an event.
   const result = await wrapped.lookup_customer?.execute?.({
     request: { customer_id: "cus_4" },
-    telemetry: { intent: "look up account" },
+    telemetry: { user_intent: "look up account" },
   });
   assert.deepEqual(result, { request: { customer_id: "cus_4" } });
 
   const events = batches.flatMap((batch) => batch.events);
   const toolCall = events.find((event) => event.kind === "tool_call");
   assert.ok(toolCall);
-  assert.equal(toolCall?.metadata.intent, "look up account");
+  assert.equal(toolCall?.metadata.user_intent, "look up account");
 });
 
 test("Mastra-wrapped zod/v4 tool accepts calls that omit telemetry entirely (loose default)", () => {
@@ -568,7 +568,7 @@ test("default extraction reads sessionId/requestId/headers/authInfo from context
 
   const wrapped = wrapMastraToolsWithRecorder(tools, recorder);
   await wrapped.echo?.execute?.(
-    { msg: "hi", telemetry: { intent: "say hi" } },
+    { msg: "hi", telemetry: { user_intent: "say hi" } },
     {
       mcp: {
         extra: {
@@ -797,12 +797,12 @@ test("nudged JSON Schema also flows through wrapMastraTools for tools using JSON
 
   await wrapped.lookup?.execute?.({
     id: "cus_1",
-    telemetry: { intent: "lookup via JSON schema" },
+    telemetry: { user_intent: "lookup via JSON schema" },
   });
 
   const events = batches.flatMap((batch) => batch.events);
   const toolCall = events.find((event) => event.kind === "tool_call");
-  assert.equal(toolCall?.metadata.intent, "lookup via JSON schema");
+  assert.equal(toolCall?.metadata.user_intent, "lookup via JSON schema");
 });
 
 test("wrapped Mastra tools sharing a JSON-RPC requestId emit distinct event_ids", async () => {

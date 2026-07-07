@@ -32,8 +32,8 @@ import {
   appendTelemetryHint,
   decorateInputSchemaWithTelemetry,
   extractTelemetryArguments,
-  INTENT_DESCRIPTION,
   TELEMETRY_PROPERTY_DESCRIPTION,
+  USER_INTENT_DESCRIPTION,
 } from "./schema.js";
 import { createBoundedKeySet, deriveToolResultError, headerValue, isJsonObjectSchema, isRecord, workflowRunIdFromHeaders } from "./utils.js";
 import type { HeaderBag, JsonObjectSchema } from "./types.js";
@@ -49,15 +49,15 @@ const nudgeTelemetryDescriptions = (schema: unknown): unknown => {
   const telemetry = schema.properties?.telemetry;
   if (!isJsonObjectSchema(telemetry)) return schema;
 
-  const intent = telemetry.properties?.intent;
+  const userIntent = telemetry.properties?.user_intent;
   const nudgedTelemetry: JsonObjectSchema = {
     ...telemetry,
     description: TELEMETRY_PROPERTY_DESCRIPTION,
     properties: {
       ...(telemetry.properties ?? {}),
-      ...(isRecord(intent)
+      ...(isRecord(userIntent)
         ? {
-            intent: { ...intent, description: INTENT_DESCRIPTION },
+            user_intent: { ...userIntent, description: USER_INTENT_DESCRIPTION },
           }
         : {}),
     },
@@ -351,7 +351,7 @@ export const createAnalyticsRecorder = (
         ...(registration.title !== undefined ? { title: registration.title } : {}),
         // Same nudge `decorateDefinitions` applies in the registry path — the
         // caller-owned McpServer path must also tell agents to pass
-        // telemetry.intent, or sessions arrive with no intent (ARM-24).
+        // telemetry.user_intent, or sessions arrive with no intent (ARM-24).
         description: appendTelemetryHint(registration.description),
         inputSchema: decoratedSchema,
       } as Parameters<typeof server.registerTool>[1],

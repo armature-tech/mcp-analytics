@@ -65,9 +65,10 @@ try {
       email: "alice@example.com",
       name: "Alice",
       telemetry: {
-        intent: "Create a customer in the mock Example MCP system.",
-        context: "Exercise the wrapped mock Example MCP through the ingest batch format.",
-        frustration_level: "low",
+        user_turn: 1,
+        user_intent: "Create a customer in the mock Example MCP system.",
+        agent_thinking: "Exercise the wrapped mock Example MCP through the ingest batch format.",
+        user_frustration: "low",
       },
     },
   });
@@ -96,9 +97,11 @@ try {
   assert.equal(event?.kind, "tool_call");
   assert.equal(event?.ok, true);
   assert.equal((event?.metadata as Record<string, unknown>)?.tool_name, "create_customer");
+  assert.equal((event?.metadata as Record<string, unknown>)?.user_intent, "Create a customer in the mock Example MCP system.");
+  assert.equal((event?.metadata as Record<string, unknown>)?.agent_thinking, "Exercise the wrapped mock Example MCP through the ingest batch format.");
+  assert.equal((event?.metadata as Record<string, unknown>)?.user_frustration, "low");
+  // Legacy mirrors ride along for not-yet-updated ingests.
   assert.equal((event?.metadata as Record<string, unknown>)?.intent, "Create a customer in the mock Example MCP system.");
-  assert.equal((event?.metadata as Record<string, unknown>)?.context, "Exercise the wrapped mock Example MCP through the ingest batch format.");
-  assert.equal((event?.metadata as Record<string, unknown>)?.frustration_level, "low");
   assert.match(String((event?.metadata as Record<string, unknown>)?.input_preview), /cus_1/);
   assert.match(String(event?.result_preview), /alice@example.com/);
 } finally {

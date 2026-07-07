@@ -31,6 +31,7 @@ export {
   createTelemetryJsonSchema,
   decorateInputSchemaWithTelemetry,
   extractTelemetryArguments,
+  normalizeTelemetryArgs,
 } from "./schema.js";
 
 export {

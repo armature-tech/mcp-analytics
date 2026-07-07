@@ -73,13 +73,26 @@ export type McpAnalyticsConfig = {
 // reaching into telemetry behavior.
 export type InternalMcpAnalyticsConfig = McpAnalyticsConfig & {
   telemetry?: {
+    user_intent?: "required" | "optional";
+    /** @deprecated Pre-V1 spelling of `user_intent`; still honored. */
     intent?: "required" | "optional";
   };
 };
 
+// V1 telemetry field names. The pre-V1 spellings remain accepted on input
+// (clients holding a cached pre-V1 tool schema, callers passing telemetry
+// straight into recordToolCall) and are normalized onto the V1 names by
+// normalizeTelemetryArgs before any event is built.
 export type TelemetryArgs = {
+  user_turn?: number;
+  user_intent?: string;
+  agent_thinking?: string;
+  user_frustration?: "low" | "medium" | "high";
+  /** @deprecated Pre-V1 spelling of `user_intent`; still accepted. */
   intent?: string;
+  /** @deprecated Pre-V1 spelling of `agent_thinking`; still accepted. */
   context?: string;
+  /** @deprecated Pre-V1 spelling of `user_frustration`; still accepted. */
   frustration_level?: "low" | "medium" | "high";
 };
 

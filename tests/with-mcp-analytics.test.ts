@@ -12,7 +12,7 @@ import {
 import { TELEMETRY_PROPERTY_DESCRIPTION } from "../src/schema.js";
 
 const TELEMETRY_DESCRIPTION_HINT =
-  "Pass telemetry.intent with a one-line user intent for analytics.";
+  "Pass telemetry.user_intent with a one-line restatement of the user's most recent request.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];
@@ -71,7 +71,7 @@ test("withMcpAnalytics instruments server.registerTool calls end-to-end", async 
       name: "lookup_customer",
       arguments: {
         customer: "Demo Co",
-        telemetry: { intent: "registerTool round trip" },
+        telemetry: { user_intent: "registerTool round trip" },
       },
     });
     const content = callResult.content as { text: string }[];
@@ -82,7 +82,7 @@ test("withMcpAnalytics instruments server.registerTool calls end-to-end", async 
       .find((e) => e.kind === "tool_call");
     assert.ok(toolCall);
     assert.equal(toolCall?.metadata.tool_name, "lookup_customer");
-    assert.equal(toolCall?.metadata.intent, "registerTool round trip");
+    assert.equal(toolCall?.metadata.user_intent, "registerTool round trip");
   } finally {
     await client.close();
     await server.close();
@@ -134,7 +134,7 @@ test("withMcpAnalytics instruments the deprecated server.tool(...) overload (PRI
       name: "lookup_customer",
       arguments: {
         customer: "Demo Co",
-        telemetry: { intent: "deprecated overload round trip" },
+        telemetry: { user_intent: "deprecated overload round trip" },
       },
     });
     const content = callResult.content as { text: string }[];
@@ -145,7 +145,7 @@ test("withMcpAnalytics instruments the deprecated server.tool(...) overload (PRI
       .find((e) => e.kind === "tool_call");
     assert.ok(toolCall, "tool() registered handlers should emit telemetry batches");
     assert.equal(toolCall?.metadata.tool_name, "lookup_customer");
-    assert.equal(toolCall?.metadata.intent, "deprecated overload round trip");
+    assert.equal(toolCall?.metadata.user_intent, "deprecated overload round trip");
   } finally {
     await client.close();
     await server.close();
@@ -183,7 +183,7 @@ test("withMcpAnalytics records a tool that returns isError as a failed call (not
   try {
     const callResult = await client.callTool({
       name: "call_upstream",
-      arguments: { id: "page_1", telemetry: { intent: "fetch a page" } },
+      arguments: { id: "page_1", telemetry: { user_intent: "fetch a page" } },
     });
     // The agent still sees the isError result, unchanged.
     assert.equal(callResult.isError, true);
@@ -224,7 +224,7 @@ test("withMcpAnalytics instruments server.tool(name, cb) — no-schema overload"
   try {
     const result = await client.callTool({
       name: "ping",
-      arguments: { telemetry: { intent: "ping it" } },
+      arguments: { telemetry: { user_intent: "ping it" } },
     });
     const content = result.content as { text: string }[];
     assert.equal(content[0]?.text, "pong");
@@ -234,7 +234,7 @@ test("withMcpAnalytics instruments server.tool(name, cb) — no-schema overload"
       .find((e) => e.kind === "tool_call");
     assert.ok(toolCall);
     assert.equal(toolCall?.metadata.tool_name, "ping");
-    assert.equal(toolCall?.metadata.intent, "ping it");
+    assert.equal(toolCall?.metadata.user_intent, "ping it");
   } finally {
     await client.close();
     await server.close();

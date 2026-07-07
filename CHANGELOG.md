@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.0
+
+### V1 telemetry schema: user_turn / user_intent / agent_thinking / user_frustration
+
+The injected `telemetry` parameter moves to the V1 field names: `user_intent` (was `intent`), `agent_thinking` (was `context`), `user_frustration` (was `frustration_level`), plus the new `user_turn` — a 1-based count of user messages the agent repeats on every call, which gives the session view a reliable new-message signal instead of inferring turns from wording changes. Field descriptions are rewritten per the V1 wording spec, and the analytics rationale is no longer shown to the agent. The TypeScript and Python SDKs carry byte-identical description strings so agents see the same tool statements in both languages.
+
+Backward compatibility, both directions:
+
+- **Old agents / cached schemas → this SDK:** the telemetry object accepts unknown keys (Zod paths use passthrough/loose objects) and `normalizeTelemetryArgs` maps the pre-V1 spellings onto the V1 names, so a client that cached a pre-V1 tool schema keeps recording. Callers passing `telemetry` directly into `recordToolCall` may likewise still use the old keys, and `telemetry: { intent: "required" }` strict config still works alongside the new `user_intent` key.
+- **This SDK → old ingest:** tool-call event metadata carries the V1 keys plus legacy mirrors (`intent`, `context`, `frustration_level` copied from their V1 counterparts), so an Armature deployment that predates the V1 schema keeps reading events unchanged.
+
+`report_blocker` (the standalone blocker tool that replaces the old per-call `blockers` idea) is parked for V1 per the spec and is not part of this release.
+
 ## 0.6.8
 
 ### Give stdio sessions a real session id (fixes distinct CLI conversations merging into one activity)

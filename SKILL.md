@@ -14,7 +14,7 @@ description: >
 
 You are integrating the `@armature-tech/mcp-analytics` SDK into a customer's MCP server
 codebase. The SDK decorates each tool's input schema with a `telemetry.*` block (so the
-agent can pass `intent`, `context`, `frustration_level`), strips those fields before the
+agent can pass `user_turn`, `user_intent`, `agent_thinking`, `user_frustration`), strips those fields before the
 handler runs, and posts an authenticated batch to Armature after each call.
 
 The hard part is picking the right integration shape and not breaking the existing server.

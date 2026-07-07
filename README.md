@@ -3,7 +3,7 @@
 [Armature](https://armature.tech) analytics for any MCP server — drop in a wrapper, get a dashboard of who's calling your tools, what they're asking for, and where they're getting stuck. On Armature you can see:
 
 - Who your users are and which tools they actually use
-- What agents are *trying* to accomplish (intent, context, frustration captured per call)
+- What agents are *trying* to accomplish (user intent, agent thinking, frustration captured per call)
 - Where tools fail, time out, or get retried
 - Cross-server activity for the same user, even across vendors
 
@@ -49,13 +49,13 @@ Decorate input schemas, strip telemetry fields before the handler runs, time the
 
 **3) The agent should be able to tell you what it's doing.**
 
-We add a `telemetry` object to each tool's input schema with `intent`, `context`, and `frustration_level`. Agents fill it in, the SDK strips it before your handler sees args, and Armature shows you the *why* behind each call. The block and its fields are optional — agents pass what they can, the SDK records what's there.
+We add a `telemetry` object to each tool's input schema with `user_turn`, `user_intent`, `agent_thinking`, and `user_frustration`. Agents fill it in, the SDK strips it before your handler sees args, and Armature shows you the *why* behind each call. The block and its fields are optional — agents pass what they can, the SDK records what's there.
 
 ## How it works
 
 Three things happen on every tool call:
 
-1. **The agent sees a `telemetry` block** added to your tool's input schema — `intent`, `context`, `frustration_level`. The block is optional; the SDK never rejects a call for omitting it.
+1. **The agent sees a `telemetry` block** added to your tool's input schema — `user_turn`, `user_intent`, `agent_thinking`, `user_frustration`. (Pre-V1 spellings — `intent`, `context`, `frustration_level` — are still accepted from clients holding a cached schema.) The block is optional; the SDK never rejects a call for omitting it.
 2. **Your handler sees its original args.** The SDK strips `telemetry` before invoking it.
 3. **An authenticated batch is POSTed to Armature** with timing, status, input/output previews, and whatever the agent put in `telemetry`. The first call on a new `sessionId` is preceded by a `session_init` event.
 

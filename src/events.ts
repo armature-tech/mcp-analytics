@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { normalizeTelemetryArgs } from "./schema.js";
 import type {
   AnalyticsEventKind,
   AnalyticsIngestBatch,
@@ -106,6 +107,7 @@ export const buildToolCallEvent = ({
   const resultPreview = output === undefined
     ? null
     : truncateUtf8(stringifyPreview(output), MAX_PREVIEW_BYTES);
+  const t = normalizeTelemetryArgs(telemetry);
 
   return {
     ...workflowStamp(workflowRunId),
@@ -120,9 +122,15 @@ export const buildToolCallEvent = ({
     error: errorMessage ?? null,
     metadata: {
       tool_name: toolName,
-      intent: telemetry?.intent ?? null,
-      context: telemetry?.context ?? null,
-      frustration_level: telemetry?.frustration_level ?? null,
+      user_turn: t?.user_turn ?? null,
+      user_intent: t?.user_intent ?? null,
+      agent_thinking: t?.agent_thinking ?? null,
+      user_frustration: t?.user_frustration ?? null,
+      // Legacy mirrors (pre-V1 key names) so an ingest that hasn't picked up
+      // the V1 schema keeps reading events from this SDK.
+      intent: t?.user_intent ?? null,
+      context: t?.agent_thinking ?? null,
+      frustration_level: t?.user_frustration ?? null,
       input_preview: inputPreview.value,
     },
     script_source: source.value,
