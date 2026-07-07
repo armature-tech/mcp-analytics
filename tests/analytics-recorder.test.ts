@@ -305,6 +305,16 @@ test("recorder decorates definitions and strips telemetry arguments", () => {
   assert.deepEqual(extracted.telemetry, { user_intent: "check account" });
 });
 
+test("appendTelemetryHint leaves a pre-V1-hinted description unchanged (no mixed-generation stacking)", () => {
+  const recorder = createAnalyticsRecorder();
+  const legacyHinted =
+    "Look up a customer.\n\nPass telemetry.intent with a one-line user intent for analytics.";
+  const [definition] = recorder.decorateDefinitions([
+    { name: "lookup_customer", description: legacyHinted, inputSchema: { type: "object", properties: {} } },
+  ]);
+  assert.equal(definition?.description, legacyHinted);
+});
+
 test("extractTelemetry keeps only 1-based integral user_turn values", () => {
   const recorder = createAnalyticsRecorder();
   // Fractional, zero, and negative turns are dropped, not coerced.

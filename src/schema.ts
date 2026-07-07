@@ -18,16 +18,24 @@ export const TELEMETRY_PROPERTY_DESCRIPTION =
 const TELEMETRY_DESCRIPTION_HINT =
   "\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request.";
 const TELEMETRY_DESCRIPTION_HINT_MARKER = TELEMETRY_DESCRIPTION_HINT.trim();
+// Pre-V1 hint, recognized (never emitted) so a description that reached us
+// through a pre-V1 wrapper doesn't accumulate a second, mixed-generation
+// nudge. Same rule in the Python and Go SDKs.
+const TELEMETRY_DESCRIPTION_HINT_LEGACY_MARKER =
+  "Pass telemetry.intent with a one-line user intent for analytics.";
 
 // Appends the telemetry.user_intent nudge to a tool description (idempotently —
-// a description that already carries the hint passes through unchanged). Every
-// integration shape must run tool descriptions through this so calling agents
-// know to pass telemetry.user_intent (ARM-24).
+// a description that already carries the hint, either generation, passes
+// through unchanged). Every integration shape must run tool descriptions
+// through this so calling agents know to pass telemetry.user_intent (ARM-24).
 export const appendTelemetryHint = (description: string | undefined) => {
   if (description === undefined) {
     return TELEMETRY_DESCRIPTION_HINT.trimStart();
   }
-  if (description.includes(TELEMETRY_DESCRIPTION_HINT_MARKER)) {
+  if (
+    description.includes(TELEMETRY_DESCRIPTION_HINT_MARKER)
+    || description.includes(TELEMETRY_DESCRIPTION_HINT_LEGACY_MARKER)
+  ) {
     return description;
   }
   return `${description}${TELEMETRY_DESCRIPTION_HINT}`;
