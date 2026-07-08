@@ -16,7 +16,7 @@ import {
 } from "../src/schema.js";
 
 const TELEMETRY_DESCRIPTION_HINT =
-  "Pass telemetry.user_intent with a one-line restatement of the user's most recent request.";
+  "Pass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];

@@ -217,7 +217,7 @@ test("decorateDefinitions nudges the LLM toward telemetry.user_intent (ARM-24)",
 
   assert.equal(
     definition?.description,
-    "Look up a customer.\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request.",
+    "Look up a customer.\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.",
   );
 
   const inputSchema = definition?.inputSchema as JsonObjectSchema;
@@ -253,7 +253,7 @@ test("decorateDefinitions is idempotent when invoked twice on the same tools (AR
 
   assert.equal(
     twice[0]?.description,
-    "Look up a customer.\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request.",
+    "Look up a customer.\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.",
   );
   const telemetry = (twice[0]?.inputSchema as JsonObjectSchema).properties
     ?.telemetry as JsonObjectSchema;
@@ -277,7 +277,7 @@ test("decorateDefinitions adds the hint as the description when the tool has non
 
   assert.equal(
     definition?.description,
-    "Pass telemetry.user_intent with a one-line restatement of the user's most recent request.",
+    "Pass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.",
   );
 });
 
@@ -313,6 +313,16 @@ test("appendTelemetryHint leaves a pre-V1-hinted description unchanged (no mixed
     { name: "lookup_customer", description: legacyHinted, inputSchema: { type: "object", properties: {} } },
   ]);
   assert.equal(definition?.description, legacyHinted);
+});
+
+test("appendTelemetryHint leaves an earlier-V1-hinted (user_intent only) description unchanged", () => {
+  const recorder = createAnalyticsRecorder();
+  const v1Hinted =
+    "Look up a customer.\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request.";
+  const [definition] = recorder.decorateDefinitions([
+    { name: "lookup_customer", description: v1Hinted, inputSchema: { type: "object", properties: {} } },
+  ]);
+  assert.equal(definition?.description, v1Hinted);
 });
 
 test("extractTelemetry keeps only 1-based integral user_turn values", () => {
