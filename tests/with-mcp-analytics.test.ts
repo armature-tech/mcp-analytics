@@ -4,12 +4,16 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import * as zv4 from "zod/v4";
 import {
   withMcpAnalytics,
   type AnalyticsIngestBatch,
   type JsonObjectSchema,
 } from "../src/index.js";
-import { TELEMETRY_PROPERTY_DESCRIPTION } from "../src/schema.js";
+import {
+  decorateInputSchemaWithTelemetry,
+  TELEMETRY_PROPERTY_DESCRIPTION,
+} from "../src/schema.js";
 
 const TELEMETRY_DESCRIPTION_HINT =
   "Pass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.";
@@ -200,6 +204,44 @@ test("withMcpAnalytics records a tool that returns isError as a failed call (not
     await recorder.flush();
   }
 });
+
+// The injected telemetry field must carry the raw shape's own Zod major: SDKs
+// newer than the 1.20 dev pin hard-throw "Mixed Zod versions detected in object
+// shape" at registerTool time when a v3 telemetry schema lands in a v4 shape
+// (the default for SkyBridge apps and the raw-shape style the SDK docs use).
+// This stays a unit test on the decoration boundary because the 1.20 dev pin
+// predates v4 raw shapes entirely (it can neither throw on the mix nor
+// advertise v4 fields), so a same-suite e2e would test nothing; the full
+// registerTool → tools/list → tools/call round trip on a v4 raw shape was
+// verified against SDK 1.29 + skybridge 1.2.7 + zod 4.4.3.
+test("decorateInputSchemaWithTelemetry matches the raw shape's Zod major", () => {
+  const v4Decorated = decorateInputSchemaWithTelemetry({
+    customer: zv4.string(),
+  }) as Record<string, unknown>;
+  assert.ok(
+    isRecordWithZodV4Brand(v4Decorated.telemetry),
+    "v4 raw shape must get a v4 telemetry schema",
+  );
+
+  const v3Decorated = decorateInputSchemaWithTelemetry({
+    customer: z.string(),
+  }) as Record<string, unknown>;
+  assert.ok(
+    !isRecordWithZodV4Brand(v3Decorated.telemetry),
+    "v3 raw shape must keep the v3 telemetry schema",
+  );
+
+  // Nothing to sniff on an empty shape — keeps the v3 default, which the SDK
+  // accepts in a single-version shape.
+  const emptyDecorated = decorateInputSchemaWithTelemetry(
+    {},
+  ) as Record<string, unknown>;
+  assert.ok(!isRecordWithZodV4Brand(emptyDecorated.telemetry));
+});
+
+const isRecordWithZodV4Brand = (value: unknown): boolean => {
+  return typeof value === "object" && value !== null && "_zod" in value;
+};
 
 test("withMcpAnalytics instruments server.tool(name, cb) — no-schema overload", async () => {
   const { batches, emit } = collectBatches();

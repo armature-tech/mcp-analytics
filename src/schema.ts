@@ -178,6 +178,20 @@ const isZodV3ObjectSchema = (
   );
 };
 
+// A raw shape's values carry the same version brands as whole object schemas:
+// `_zod` on every v4 schema, `_def` only on v3. The telemetry field we add must
+// be built with the shape's own Zod major, because the MCP SDK rejects shapes
+// that mix majors ("Mixed Zod versions detected in object shape") — which
+// turned server startup into a crash for every Zod-4 raw-shape app (e.g. all
+// SkyBridge/Alpic servers). An empty shape has nothing to sniff and keeps the
+// v3 telemetry field; a single-version shape is accepted by the SDK in either
+// major.
+const rawShapeUsesZodV4 = (shape: Record<string, unknown>): boolean => {
+  return Object.values(shape).some(
+    (value) => isRecord(value) && "_zod" in value,
+  );
+};
+
 // Strict mode is keyed on `user_intent` (V1 name); the pre-V1 `intent` config
 // key is still honored so internal callers don't break mid-migration.
 const isStrict = (config: InternalMcpAnalyticsConfig = {}) => {
@@ -288,7 +302,9 @@ export const decorateInputSchemaWithTelemetry = (
   if (isRawShape(inputSchema)) {
     return {
       ...inputSchema,
-      telemetry: createTelemetryInputSchema(config),
+      telemetry: rawShapeUsesZodV4(inputSchema)
+        ? createTelemetryInputSchemaV4(config)
+        : createTelemetryInputSchema(config),
     };
   }
 

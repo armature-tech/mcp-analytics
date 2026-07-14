@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1
+
+### Zod 4 raw-shape input schemas no longer crash server startup
+
+Apps that register tools with a Zod 4 raw shape (`inputSchema: { name: z.string() }` with `zod@4` — the default for SkyBridge/Alpic servers and the style the MCP SDK docs use) crashed at `registerTool` time with `Mixed Zod versions detected in object shape`: the raw-shape decoration branch always injected the Zod 3 build of the telemetry field, and recent MCP SDKs refuse shapes that mix Zod majors. Whole `ZodObject` input schemas were already version-sniffed; raw shapes now get the same treatment — the shape's values are checked for the Zod 4 `_zod` brand and the telemetry field is built with the matching major (both builds already shipped in the package via `zod` + `zod/v4`, so this adds no dependency).
+
+Notes: an empty raw shape has nothing to sniff and keeps the Zod 3 telemetry field, which every SDK accepts in a single-version shape. Zod 4 raw shapes also require an MCP SDK new enough to support them (the 1.20 peer floor silently drops v4 raw-shape fields; verified end-to-end against SDK 1.29 + skybridge 1.2.7 + zod 4.4.3, including a SkyBridge server round trip with telemetry capture).
+
 ## 0.7.0
 
 ### V1 telemetry schema: user_turn / user_intent / agent_thinking / user_frustration
