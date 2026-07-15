@@ -236,6 +236,16 @@ The seed is hashed before transmission. Armature scopes the resulting actor iden
 | **ANALYTICS_INGEST_API_KEY** | Armature ingest key |
 | **ANALYTICS_INGEST_URL** | Optional ingestion endpoint override |
 
+## Example
+
+Run the complete stdio server in [examples/minimal](examples/minimal):
+
+~~~bash
+cd examples/minimal
+npm install
+ANALYTICS_INGEST_API_KEY="..." npm start
+~~~
+
 ## Support
 
 [Open an issue](https://github.com/armature-tech/mcp-analytics/issues) · [Email us](mailto:hey@armature.tech) · [Changelog](CHANGELOG.md)
