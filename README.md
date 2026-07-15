@@ -1,147 +1,245 @@
-# @armature-tech/mcp-analytics
+# Armature MCP Analytics for TypeScript
 
-[Armature](https://armature.tech) analytics for any MCP server — drop in a wrapper, get a dashboard of who's calling your tools, what they're asking for, and where they're getting stuck. On Armature you can see:
+Understand which MCP tools agents use, what users are trying to accomplish, and where calls fail—without building an observability pipeline.
 
-- Who your users are and which tools they actually use
-- What agents are *trying* to accomplish (user intent, agent thinking, frustration captured per call)
-- Where tools fail, time out, or get retried
-- Cross-server activity for the same user, even across vendors
+[![npm version](https://img.shields.io/npm/v/%40armature-tech%2Fmcp-analytics?label=npm)](https://www.npmjs.com/package/@armature-tech/mcp-analytics)
+[![CI](https://github.com/armature-tech/mcp-analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/armature-tech/mcp-analytics/actions/workflows/ci.yml)
+[![Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-All this without rolling your own logging pipeline, schema, or auth.
+[Dashboard](https://app.armature.tech) · [Python SDK](https://github.com/armature-tech/mcp-analytics-python) · [Go SDK](https://github.com/armature-tech/mcp-analytics-go) · [Agent install](SKILL.md)
 
-## Getting Started
+## Install in 30 seconds
 
-**Cloud:** sign in at [app.armature.tech](https://app.armature.tech), create a server, copy the API key.
+### 1. Install
 
-**Install the SDK** in your MCP server repo:
+~~~bash
+npm install @armature-tech/mcp-analytics @modelcontextprotocol/sdk@^1.29.0 zod
+~~~
 
-```sh
-npm install @armature-tech/mcp-analytics @modelcontextprotocol/sdk zod
-```
+MCP SDK 1.29 or newer is required when your tools use Zod 4 raw-shape
+schemas. MCP SDK 1.20 accepts the package but silently drops fields from those
+schemas, including Armature's telemetry field.
 
-**Wrap your server** (the most common shape — an existing `McpServer` factory):
+### 2. Add your ingest key
 
-```ts
+Create a server in the [Armature dashboard](https://app.armature.tech), copy its ingest key, and add it to your environment:
+
+~~~bash
+export ANALYTICS_INGEST_API_KEY="..."
+~~~
+
+### 3. Instrument your MCP server
+
+Wrap the factory that creates your existing **McpServer**:
+
+~~~ts
 import { createMcpAnalyticsServer } from "@armature-tech/mcp-analytics";
-import { createMyMcpServer } from "./my-mcp-server.js";
+import { createMyMcpServer } from "./server.js";
 
-const server = createMcpAnalyticsServer(() => createMyMcpServer(), {
-  armature: {
-    endpointUrl: "https://app.armature.tech/api/mcp-analytics/ingest",
-    apiKey: process.env.ANALYTICS_INGEST_API_KEY,
-  },
-});
-```
+const server = createMcpAnalyticsServer(createMyMcpServer);
+~~~
 
-That's it. Every tool registered inside your factory is now instrumented. Open the dashboard and the first tool call shows up.
+> **That’s it. Make one tool call, open Armature, and the session is already there.**
 
-> Don't want to wire it up yourself? Ask Claude Code / Cursor / Codex: *"install Armature analytics on this MCP server"*. From your MCP server repo, run `npx --yes skills add armature-tech/mcp-analytics` first so the agent picks up our [integration playbook](SKILL.md) — it detects which of the four shapes your repo uses and edits the right files.
+## Built for MCP—not page views
 
-## Why mcp-analytics
+| Understand demand | Find what breaks | Improve with context |
+| --- | --- | --- |
+| See which tools and use cases people actually need. | Surface failures, retries, latency, and dead ends. | Connect every call to user intent and agent reasoning. |
 
-**1) Generic analytics don't understand MCP.**
+No custom event schema. No logging pipeline. No changes to your tool handlers.
 
-An MCP tool call has structure that page-view analytics throws away: the tool name, the args the agent constructed, whether the call succeeded, what the agent was *trying to do*. You want those as first-class fields, not buried in custom dimensions.
+## What you see in Armature
 
-**2) Instrumenting by hand is the same boilerplate every time.**
-
-Decorate input schemas, strip telemetry fields before the handler runs, time the call, batch, retry, dedupe sessions, propagate auth. Every MCP server reinvents it. This package is that boilerplate, packaged once.
-
-**3) The agent should be able to tell you what it's doing.**
-
-We add a `telemetry` object to each tool's input schema with `user_turn`, `user_intent`, `agent_thinking`, and `user_frustration`. Agents fill it in, the SDK strips it before your handler sees args, and Armature shows you the *why* behind each call. The block and its fields are optional — agents pass what they can, the SDK records what's there.
+- Complete MCP sessions and client attribution
+- The user intent behind each session
+- Every tool called by the agent
+- Input and output previews, latency, and outcome
+- Failures, timeouts, and repeated retries
+- Cross-server activity for the same actor
 
 ## How it works
 
-Three things happen on every tool call:
+Armature instruments the boundary around every tool call:
 
-1. **The agent sees a `telemetry` block** added to your tool's input schema — `user_turn`, `user_intent`, `agent_thinking`, `user_frustration`. (Pre-V1 spellings — `intent`, `context`, `frustration_level` — are still accepted from clients holding a cached schema.) The block is optional; the SDK never rejects a call for omitting it.
-2. **Your handler sees its original args.** The SDK strips `telemetry` before invoking it.
-3. **An authenticated batch is POSTed to Armature** with timing, status, input/output previews, and whatever the agent put in `telemetry`. The first call on a new `sessionId` is preceded by a `session_init` event.
+1. The SDK adds an optional **telemetry** block to the tool’s input schema.
+2. The agent can attach user intent, reasoning, and frustration to the call.
+3. The SDK removes telemetry before your handler receives the arguments.
+4. Timing, outcome, and truncated previews are sent to your dashboard.
 
-## Other integration shapes
+~~~json
+{
+  "telemetry": {
+    "user_turn": 1,
+    "user_intent": "Check whether the customer's last payment succeeded",
+    "agent_thinking": "The payment lookup tool provides the requested status",
+    "user_frustration": "low"
+  }
+}
+~~~
 
-`createMcpAnalyticsServer` covers most repos. If yours doesn't fit, there are three other entry points — the [agent skill](SKILL.md) picks the right one automatically:
+All telemetry fields are optional. The earlier **intent**, **context**, and **frustration_level** names remain accepted for clients with cached schemas.
 
-- **Concrete-server registry helper** — `instrumentMcpServerTools({ server, tools, config, mapTool })`. Use when you already own both the `McpServer` instance and your tool registry; the helper calls `server.registerTool(...)` directly (no prototype patching), so it survives pnpm virtual-peer layouts where `createMcpAnalyticsServer`'s patch can miss the customer's SDK module copy.
-- **Registry-style** — `createAnalyticsRecorder()` + `analytics.tool(...)` + `analytics.createMcpServer(...)`. Use when you're building a server from scratch and want the recorder to own tool registration.
-- **Dispatcher-style** — same recorder, but you call `analytics.toolDefinitions()` from your `tools/list` handler and `analytics.dispatch(name, args, ctx)` from `tools/call`. For servers that hand-roll the JSON-RPC layer.
-- **Mastra** — `wrapMastraTools(tools, config)` from `@armature-tech/mcp-analytics/mastra`. Drop the wrapped map into `new MCPServer({ tools })`.
+> **Privacy:** Armature is observability, not authentication. Keep your existing MCP authentication and authorization in place. Do not put secrets in tool arguments or telemetry fields.
 
-Code examples for all three live in [`SKILL.md`](SKILL.md).
+## Choose the integration that matches your server
 
-## Serverless / stateless HTTP (Vercel, Lambda, Cloud Run)
+| Server shape | Integration |
+| --- | --- |
+| Existing **McpServer** factory | **createMcpAnalyticsServer(factory, config)** |
+| Existing server and tool registry | **instrumentMcpServerTools(...)** |
+| Custom registry or JSON-RPC dispatcher | **createAnalyticsRecorder(...)** |
+| Mastra tool map | **wrapMastraTools(...)** |
+| Stateless HTTP or serverless | **resolveStatelessHttpSession(...)** |
 
-Stateless deployments have no memory between invocations: `initialize` — the only
-request carrying the client's name/version — lands on one instance, tool calls land
-on others, and clients only echo an `Mcp-Session-Id` header if the server issued one.
-Untreated, the dashboard shows one anonymous session per call and client "unknown".
+### Existing server and tool registry
 
-`resolveStatelessHttpSession` fixes both with no session store: the session id minted
-at `initialize` encodes the client identity (`mcp_<name>_v_<version>_<uuid>`), the
-client echoes it on every request, and each invocation parses it back out:
+Use **instrumentMcpServerTools** when you own an existing server instance and a registry of tool definitions:
 
-```ts
+~~~ts
+instrumentMcpServerTools({
+  server,
+  tools,
+  config: {
+    armature: {
+      delivery: "await",
+    },
+  },
+  mapTool,
+});
+~~~
+
+This path registers tools directly and works with package layouts where wrapping the server factory is not a fit.
+
+### Custom dispatcher
+
+Use the recorder when you manage **tools/list** and **tools/call** yourself:
+
+~~~ts
+import { createAnalyticsRecorder } from "@armature-tech/mcp-analytics";
+
+const analytics = createAnalyticsRecorder({
+  armature: {
+    delivery: "await",
+  },
+});
+
+analytics.tool(toolDefinition, toolHandler);
+
+// tools/list
+const tools = analytics.toolDefinitions();
+
+// tools/call
+const result = await analytics.dispatch(name, args, context);
+~~~
+
+### Mastra
+
+~~~ts
+import { wrapMastraTools } from "@armature-tech/mcp-analytics/mastra";
+
+const instrumentedTools = wrapMastraTools(tools, {
+  armature: {
+    delivery: "await",
+  },
+});
+~~~
+
+### Stateless HTTP and serverless
+
+Initialization and tool calls can land on different instances in stateless deployments. **resolveStatelessHttpSession** preserves the MCP client and session identity without a session store:
+
+~~~ts
 import { resolveStatelessHttpSession } from "@armature-tech/mcp-analytics";
 
-export default async (req, res) => {
-  const session = resolveStatelessHttpSession({ body: req.body, headers: req.headers });
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: session.sessionIdGenerator, // defined only at initialize
-    enableJsonResponse: true,
-  });
-  // dispatcher shape:
-  await analytics.dispatch(name, args, { ctx, ...session.dispatchContext });
-  // ... connect server, transport.handleRequest(req, res, req.body)
-};
-```
+const session = resolveStatelessHttpSession({
+  body: requestBody,
+  headers: requestHeaders,
+});
 
-The recorder also parses identity-bearing session ids on its own as a last-resort
-fallback, so client attribution works even when only the transport side is wired.
-Use `delivery: "await"` in serverless (see Delivery mode below).
+const transport = new StreamableHTTPServerTransport({
+  sessionIdGenerator: session.sessionIdGenerator,
+  enableJsonResponse: true,
+});
 
-Attribution is best-effort telemetry, not a security boundary: the echoed id
-carries no signature, so a malicious caller can claim any client name. Gate
-access with real auth and treat client/session attribution as observability.
+await analytics.dispatch(name, args, {
+  ...context,
+  ...session.dispatchContext,
+});
+~~~
+
+Use **delivery: "await"** in serverless and short-lived processes.
+
+Client attribution is best-effort observability, not a security boundary. Continue to gate access with real authentication.
+
+## Let your coding agent install it
+
+From your MCP server repository:
+
+~~~bash
+npx --yes skills add armature-tech/mcp-analytics
+~~~
+
+Then ask Claude Code, Cursor, or Codex:
+
+> Install Armature MCP Analytics using the repository’s SKILL.md. Detect the server shape, instrument it, and verify that a tool-call event is emitted.
+
+The full integration playbook is in [SKILL.md](SKILL.md).
 
 ## Configuration
 
-```ts
+Most servers only need **ANALYTICS_INGEST_API_KEY**. Operational controls are available when you need them:
+
+~~~ts
 type McpAnalyticsConfig = {
   armature?: {
-    endpointUrl?: string;     // default reads ANALYTICS_INGEST_URL
-    apiKey?: string;          // default reads ANALYTICS_INGEST_API_KEY
+    endpointUrl?: string;
+    apiKey?: string;
     actorId?: string | ((input) => string | Promise<string>);
-    enabled?: boolean;        // default true
-    delivery?: "background" | "await"; // default "background"
-    timeoutMs?: number;       // default 500
-    emit?: (batch) => void | Promise<void>; // override the network emitter
+    enabled?: boolean;
+    delivery?: "background" | "await";
+    timeoutMs?: number;
+    emit?: (batch) => void | Promise<void>;
     onError?: (error, batch) => void;
   };
 };
-```
+~~~
 
-The shape of the `telemetry` block on each tool's input schema is Armature-owned and not customer-configurable. Customers only set operational config (delivery, actor id, transport).
+| Option | Default | Purpose |
+| --- | --- | --- |
+| **endpointUrl** | Armature cloud | Override the ingestion endpoint |
+| **apiKey** | **ANALYTICS_INGEST_API_KEY** | Authenticate events and identify the MCP server |
+| **actorId** | Derived from request auth | Supply a stable user or tenant seed |
+| **enabled** | **true** | Enable or disable instrumentation |
+| **delivery** | **"background"** | Use **"await"** for serverless or short-lived processes |
+| **timeoutMs** | **500** | Set the delivery timeout |
+| **emit** | Network emitter | Replace delivery for tests or custom pipelines |
+| **onError** | None | Observe delivery failures |
 
-**Delivery mode.** `"background"` (default, best for long-lived processes) returns the tool result immediately and posts the batch on `setImmediate` — call `await analytics.flush()` at shutdown. `"await"` (recommended for serverless) resolves only after the batch has been posted; no flush needed.
+### Delivery
 
-**Actor id.** A SHA-256 of an actor seed. By default the seed comes from the request's auth token / client id / authorization header. Pass a static `armature.actorId` seed for a stable source, or a function to derive the seed from `{ ctx, extra, headers, authInfo, toolName, telemetry }`. Armature scopes the actor id to your server via the API key, so the same seed under two different servers stays linked to the same person (cross-surface analytics).
+- **"background"** returns tool results immediately and posts events on the next turn of the event loop. Call **await recorder.flush()** during shutdown.
+- **"await"** waits for the delivery attempt before returning. Use it for serverless functions and short-lived processes.
 
-**Missing API key.** The SDK silently skips delivery — useful for local development.
+If the API key is missing, delivery quietly no-ops for local development.
 
-**Auth.** Each batch is POSTed with `Authorization: Bearer <apiKey>`. Server identity is resolved from the API key — no separate header.
+### Actor identification
+
+By default, the SDK derives an actor seed from request authentication information. You may provide a string or function through **actorId**.
+
+The seed is hashed before transmission. Armature scopes the resulting actor identifier to your server.
 
 ## Environment variables
 
 | Variable | Purpose |
 | --- | --- |
-| `ANALYTICS_INGEST_URL` | Ingest endpoint (defaults to `https://app.armature.tech/api/mcp-analytics/ingest`; override for a local mock or staging) |
-| `ANALYTICS_INGEST_API_KEY` | Your Armature API key — identifies the MCP server and signs each batch |
+| **ANALYTICS_INGEST_API_KEY** | Armature ingest key |
+| **ANALYTICS_INGEST_URL** | Optional ingestion endpoint override |
 
-## More
+## Support
 
-- **Custom integrations** — `withMcpAnalytics`, `createAnalyticsRecorder`, `decorateInputSchemaWithTelemetry`, and other lower-level primitives are exported for cases the four shapes don't cover. See [`docs/`](docs/) and the source.
-- **Recording `session_init` explicitly** — `recordToolCall` already emits one on the first call per `sessionId`. Call `analytics.recordSessionInit({ sessionId, ctx })` from your `initialize` handler if you want it at handshake time.
-- **Flushing on the `McpServer` path** — use `withMcpAnalytics(config, createServer)` instead of `createMcpAnalyticsServer`; it returns `{ result, recorder }` so you can `await recorder.flush()`.
-- **AI agents integrating this** — read [`SKILL.md`](SKILL.md) (also shipped in the npm tarball).
-- **Support** — `hey@armature.tech` or open an issue.
+[Open an issue](https://github.com/armature-tech/mcp-analytics/issues) · [Email us](mailto:hey@armature.tech) · [Changelog](CHANGELOG.md)
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
