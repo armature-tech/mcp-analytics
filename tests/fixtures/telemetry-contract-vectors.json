@@ -1,0 +1,247 @@
+{
+  "_comment": "Shared cross-SDK telemetry contract vectors. Copies of this file live in all three SDK packages and must stay byte-identical. See packages/TELEMETRY-CONTRACT.md in the monorepo.",
+  "placeholders": {
+    "binary": "[binary removed]",
+    "base64": "[base64 removed]",
+    "redaction_failed": "[redaction failed]"
+  },
+  "extraction": [
+    {
+      "name": "injected_strips_and_exports_v1_fields",
+      "mode": "injected",
+      "args": {
+        "q": "x",
+        "telemetry": {
+          "user_turn": 3,
+          "user_intent": "find x",
+          "agent_thinking": "searching",
+          "user_frustration": "low"
+        }
+      },
+      "expect_args": {
+        "q": "x"
+      },
+      "expect_telemetry": {
+        "user_turn": 3,
+        "user_intent": "find x",
+        "agent_thinking": "searching",
+        "user_frustration": "low"
+      }
+    },
+    {
+      "name": "injected_normalizes_legacy_aliases",
+      "mode": "injected",
+      "args": {
+        "q": "x",
+        "telemetry": {
+          "intent": "legacy intent",
+          "context": "legacy thinking",
+          "frustration_level": "high"
+        }
+      },
+      "expect_args": {
+        "q": "x"
+      },
+      "expect_telemetry": {
+        "user_intent": "legacy intent",
+        "agent_thinking": "legacy thinking",
+        "user_frustration": "high"
+      }
+    },
+    {
+      "name": "injected_v1_wins_over_alias",
+      "mode": "injected",
+      "args": {
+        "telemetry": {
+          "user_intent": "v1",
+          "intent": "legacy"
+        }
+      },
+      "expect_args": {},
+      "expect_telemetry": {
+        "user_intent": "v1"
+      }
+    },
+    {
+      "name": "injected_drops_invalid_user_turn",
+      "mode": "injected",
+      "args": {
+        "telemetry": {
+          "user_turn": 0,
+          "user_intent": "x"
+        }
+      },
+      "expect_args": {},
+      "expect_telemetry": {
+        "user_intent": "x"
+      }
+    },
+    {
+      "name": "injected_without_telemetry_passthrough",
+      "mode": "injected",
+      "args": {
+        "q": "x"
+      },
+      "expect_args": {
+        "q": "x"
+      },
+      "expect_telemetry": null
+    },
+    {
+      "name": "owned_leaves_args_and_exports_nothing",
+      "mode": "owned",
+      "args": {
+        "q": "x",
+        "telemetry": {
+          "user_intent": "customer data",
+          "intent": "also customer data"
+        }
+      },
+      "expect_args": {
+        "q": "x",
+        "telemetry": {
+          "user_intent": "customer data",
+          "intent": "also customer data"
+        }
+      },
+      "expect_telemetry": null
+    },
+    {
+      "name": "scrub_strips_without_export",
+      "mode": "scrub",
+      "args": {
+        "q": "x",
+        "telemetry": {
+          "user_intent": "sent by cached client",
+          "context": "legacy alias"
+        }
+      },
+      "expect_args": {
+        "q": "x"
+      },
+      "expect_telemetry": null
+    },
+    {
+      "name": "scrub_without_telemetry_passthrough",
+      "mode": "scrub",
+      "args": {
+        "q": "x"
+      },
+      "expect_args": {
+        "q": "x"
+      },
+      "expect_telemetry": null
+    }
+  ],
+  "sanitization": [
+    {
+      "name": "image_block_data_replaced",
+      "value": {
+        "type": "image",
+        "data": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB",
+        "mimeType": "image/png"
+      },
+      "expect": {
+        "type": "image",
+        "data": "[binary removed]",
+        "mimeType": "image/png"
+      }
+    },
+    {
+      "name": "audio_block_data_replaced",
+      "value": {
+        "type": "audio",
+        "data": "QUFBQQ==",
+        "mimeType": "audio/wav"
+      },
+      "expect": {
+        "type": "audio",
+        "data": "[binary removed]",
+        "mimeType": "audio/wav"
+      }
+    },
+    {
+      "name": "resource_blob_replaced",
+      "value": {
+        "content": [
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "file:///x.bin",
+              "blob": "QUFBQQ=="
+            }
+          }
+        ]
+      },
+      "expect": {
+        "content": [
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "file:///x.bin",
+              "blob": "[binary removed]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "long_base64_string_replaced",
+      "value": {
+        "payload": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB"
+      },
+      "expect": {
+        "payload": "[base64 removed]"
+      }
+    },
+    {
+      "name": "data_uri_replaced",
+      "value": "data:image/png;base64,QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB",
+      "expect": "[base64 removed]"
+    },
+    {
+      "name": "short_base64_kept",
+      "value": "QUFBQQ==",
+      "expect": "QUFBQQ=="
+    },
+    {
+      "name": "long_prose_kept",
+      "value": "the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going",
+      "expect": "the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going the quick brown fox jumps over the lazy dog and keeps going"
+    },
+    {
+      "name": "nested_arrays_and_objects",
+      "value": [
+        {
+          "a": [
+            "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB",
+            "keep"
+          ]
+        },
+        "keep too"
+      ],
+      "expect": [
+        {
+          "a": [
+            "[base64 removed]",
+            "keep"
+          ]
+        },
+        "keep too"
+      ]
+    },
+    {
+      "name": "non_string_primitives_kept",
+      "value": {
+        "n": 42,
+        "b": true,
+        "z": null
+      },
+      "expect": {
+        "n": 42,
+        "b": true,
+        "z": null
+      }
+    }
+  ]
+}

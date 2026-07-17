@@ -54,6 +54,23 @@ export type ActorIdResolver = (
   input: ActorIdResolverInput,
 ) => string | Promise<string>;
 
+// Applied to sanitized tool inputs/outputs (and the normalized telemetry
+// object and error strings) before they are serialized into event previews.
+// Must return the value to serialize; a throw fails closed (the affected
+// payload is replaced with "[redaction failed]", the event still ships).
+export type RedactFunction = (value: unknown) => unknown;
+
+// Opt-in export of customer-owned argument fields as Armature telemetry
+// (gap #11). Keys are the V1 telemetry field names; values are top-level
+// argument property names to READ (never strip) from the tool's arguments.
+// An explicit `telemetry` value for the same field wins over the mapping.
+export type TelemetryFieldMap = {
+  user_turn?: string;
+  user_intent?: string;
+  agent_thinking?: string;
+  user_frustration?: string;
+};
+
 export type McpAnalyticsConfig = {
   armature?: {
     endpointUrl?: string;
@@ -64,8 +81,23 @@ export type McpAnalyticsConfig = {
     emit?: TelemetryEmitter;
     onError?: (error: unknown, batch: AnalyticsIngestBatch) => void;
     timeoutMs?: number;
+    // Master switch for conversation-derived telemetry (user_intent,
+    // agent_thinking, user_frustration, user_turn). Default true. When false
+    // the SDK injects no `telemetry` schema field, appends no description
+    // nudges, and never exports telemetry values — including values sent by
+    // clients holding a cached schema, which are stripped and dropped.
+    captureTelemetry?: boolean;
+    redact?: RedactFunction;
+    telemetryFieldMap?: TelemetryFieldMap;
   };
 };
+
+// How an instrumented tool handles the `telemetry` argument field. Resolved
+// once per tool at registration (see planToolTelemetry): `injected` — we added
+// the field, so strip it from args and export it; `owned` — the customer's
+// schema declares it, so never touch args and never export; `scrub` — capture
+// is off, so strip a cached-schema client's telemetry but export nothing.
+export type TelemetryMode = "injected" | "owned" | "scrub";
 
 // Telemetry schema shape is Armature-owned. The strict-mode flag lives here so
 // internal call sites (and tests) can opt into validation, but it is intentionally
@@ -158,6 +190,10 @@ export type InstrumentToolCallEvent = {
   requestId?: string;
   clientInfo?: McpClientInfo;
   workflowRunId?: string;
+  // Resolved telemetry mode for this tool (see TelemetryMode). Defaults to
+  // "injected" — integrations that decorate schemas themselves (Mastra, the
+  // prototype patch) pass the mode their planToolTelemetry call resolved.
+  telemetryMode?: TelemetryMode;
 };
 
 export type ToolCallHandler<T> = (args: unknown) => T | Promise<T>;
@@ -193,7 +229,10 @@ export type McpServerInfo = {
 
 export type AnalyticsRecorder = {
   decorateDefinitions: (defs: ToolDefinition[]) => ToolDefinition[];
-  extractTelemetry: (args: unknown) => ExtractedToolArguments;
+  extractTelemetry: (
+    args: unknown,
+    mode?: TelemetryMode,
+  ) => ExtractedToolArguments;
   recordToolCall: (event: RecordToolCallEvent) => Promise<void>;
   recordSessionInit: (event: RecordSessionInitEvent) => Promise<void>;
   instrumentToolCall: <T>(

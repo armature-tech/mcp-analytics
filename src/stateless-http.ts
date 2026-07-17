@@ -29,6 +29,7 @@ import { headerValue, isRecord } from "./utils.js";
 
 const SESSION_ID_RE =
   /^mcp_([A-Za-z0-9.-]+)_v_([A-Za-z0-9.-]*)_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+const SESSION_SEED_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const ANONYMOUS_NAME = "unknown";
 
@@ -44,8 +45,11 @@ const slugPart = (value: unknown, fallback: string): string => {
 /** Mint a session id that carries the client identity from `initialize`. */
 // Version falls back to an empty segment (`_v__`) so a client that never
 // reported a version stays distinguishable from one reporting literal "0".
-export const buildStatelessSessionId = (clientInfo?: McpClientInfo): string =>
-  `mcp_${slugPart(clientInfo?.name, ANONYMOUS_NAME)}_v_${slugPart(clientInfo?.version, "")}_${randomUUID()}`;
+export const buildStatelessSessionId = (clientInfo?: McpClientInfo, sessionSeed?: string): string => {
+  const seed = String(sessionSeed ?? "").trim();
+  const uuid = SESSION_SEED_RE.test(seed) ? seed.toLowerCase() : randomUUID();
+  return `mcp_${slugPart(clientInfo?.name, ANONYMOUS_NAME)}_v_${slugPart(clientInfo?.version, "")}_${uuid}`;
+};
 
 /** Recover the client identity from an identity-bearing session id. */
 export const parseStatelessSessionClientInfo = (
@@ -100,7 +104,11 @@ export const resolveStatelessHttpSession = (input: {
 }): StatelessHttpSession => {
   const initialize = findInitializeMessage(input.body);
   if (initialize) {
-    const sessionId = buildStatelessSessionId(clientInfoFromInitialize(initialize));
+    const clientInfo = clientInfoFromInitialize(initialize);
+    const sessionId = buildStatelessSessionId(
+      clientInfo,
+      headerValue(input.headers, "x-armature-session-seed") ?? undefined,
+    );
     return {
       sessionId,
       sessionIdGenerator: () => sessionId,

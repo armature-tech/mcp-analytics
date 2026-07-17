@@ -1,8 +1,5 @@
 import { createAnalyticsRecorder } from "./recorder.js";
-import {
-  appendTelemetryHint,
-  decorateInputSchemaWithTelemetry,
-} from "./schema.js";
+import { planToolTelemetry } from "./schema.js";
 import type {
   AnalyticsRecorder,
   HeaderBag,
@@ -155,10 +152,12 @@ const wrapOneTool = (
 
   const originalExecute = tool.execute;
   const toolName = tool.id ?? toolKey;
+  // Mastra tools without an inputSchema keep no schema (Mastra derives its own
+  // default); planToolTelemetry is only consulted for decoration when the tool
+  // has one, but its mode still drives extraction either way.
+  const plan = planToolTelemetry(toolName, tool.inputSchema, config);
   const decoratedInputSchema =
-    tool.inputSchema === undefined
-      ? undefined
-      : decorateInputSchemaWithTelemetry(tool.inputSchema, config);
+    tool.inputSchema === undefined ? undefined : plan.inputSchema;
 
   const wrappedExecute: MastraToolExecute = (inputData, mastraContext) => {
     // Always extract standard Mastra MCP context (`context.mcp.extra` or the
@@ -183,14 +182,16 @@ const wrapOneTool = (
         // `normalizeRequestId`). The JSON-RPC id stays available via `extra`.
         authInfo: extra?.authInfo,
         headers: extra?.requestInfo?.headers,
+        telemetryMode: plan.mode,
       },
       (strippedArgs) => originalExecute(strippedArgs, mastraContext),
     );
   };
 
+  const description = plan.applyDescription(tool.description);
   return {
     ...tool,
-    description: appendTelemetryHint(tool.description),
+    ...(description !== undefined ? { description } : {}),
     ...(decoratedInputSchema !== undefined
       ? { inputSchema: decoratedInputSchema }
       : {}),

@@ -11,10 +11,8 @@ import type {
   WithMcpAnalyticsResult,
 } from "./types.js";
 import { createAnalyticsRecorder } from "./recorder.js";
-import {
-  appendTelemetryHint,
-  decorateInputSchemaWithTelemetry,
-} from "./schema.js";
+import { planToolTelemetry } from "./schema.js";
+import type { TelemetryMode } from "./types.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
 import { deriveToolResultError, isRecord } from "./utils.js";
 
@@ -81,7 +79,13 @@ const parseDeprecatedToolArgs = (rest: unknown[]): ParsedToolArgs => {
 const wrapCallbackWithAnalytics = (
   name: string,
   cb: ToolCallback,
+  // The SDK invokes the wrapped callback according to the schema we REGISTERED
+  // (args + extra when present, just extra when absent); the original callback
+  // expects arguments according to the schema the CUSTOMER declared. The two
+  // differ for schema-less tools in injected mode, so both flags are needed.
   originalHasInputSchema: boolean,
+  registeredHasInputSchema: boolean,
+  telemetryMode: TelemetryMode,
   ctx: WithAnalyticsContext,
 ): ToolCallback => {
   const { recorder } = ctx;
@@ -89,15 +93,18 @@ const wrapCallbackWithAnalytics = (
     const startedAtMs = Date.now();
     const startedAt = new Date(startedAtMs).toISOString();
     const requestId = randomUUID();
-    const extra = (originalHasInputSchema ? maybeExtra : argsOrExtra) as
+    const extra = (registeredHasInputSchema ? maybeExtra : argsOrExtra) as
       | RequestExtra
       | undefined;
-    const { args, telemetry } = recorder.extractTelemetry(argsOrExtra);
+    const { args, telemetry } = recorder.extractTelemetry(
+      registeredHasInputSchema ? argsOrExtra : undefined,
+      telemetryMode,
+    );
 
     try {
       const output = originalHasInputSchema
-        ? await cb(args, maybeExtra)
-        : await cb(maybeExtra ?? argsOrExtra);
+        ? await cb(args, extra)
+        : await cb(extra);
 
       // A returned MCP error result (`isError: true`) is a failed call even
       // though the callback resolved; record it as an error while returning the
@@ -159,18 +166,20 @@ const installPrototypePatchOnce = () => {
 
     const { config } = ctx;
     const originalHasInputSchema = toolConfig.inputSchema !== undefined;
+    const plan = planToolTelemetry(name, toolConfig.inputSchema, config);
+    const registeredHasInputSchema = plan.inputSchema !== undefined;
+    const description = plan.applyDescription(toolConfig.description);
     const instrumentedConfig = {
       ...toolConfig,
-      description: appendTelemetryHint(toolConfig.description),
-      inputSchema: decorateInputSchemaWithTelemetry(
-        toolConfig.inputSchema,
-        config,
-      ),
+      ...(description !== undefined ? { description } : {}),
+      ...(registeredHasInputSchema ? { inputSchema: plan.inputSchema } : {}),
     };
     const wrappedCallback = wrapCallbackWithAnalytics(
       name,
       cb,
       originalHasInputSchema,
+      registeredHasInputSchema,
+      plan.mode,
       ctx,
     );
 

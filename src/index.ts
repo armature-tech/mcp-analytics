@@ -14,10 +14,13 @@ export type {
   McpServerInfo,
   RecordSessionInitEvent,
   RecordToolCallEvent,
+  RedactFunction,
   RegisteredToolHandler,
   RequestExtra,
   TelemetryArgs,
   TelemetryEmitter,
+  TelemetryFieldMap,
+  TelemetryMode,
   ToolCallHandler,
   ToolDefinition,
   ToolHandlerContext,
@@ -27,12 +30,25 @@ export type {
 
 export {
   appendTelemetryHint,
+  applyTelemetryFieldMap,
   createTelemetryInputSchema,
   createTelemetryJsonSchema,
   decorateInputSchemaWithTelemetry,
   extractTelemetryArguments,
+  isCaptureEnabled,
   normalizeTelemetryArgs,
+  planToolTelemetry,
+  schemaDeclaresTelemetry,
+  type ToolTelemetryPlan,
 } from "./schema.js";
+
+export {
+  BASE64_REMOVED_PLACEHOLDER,
+  BINARY_REMOVED_PLACEHOLDER,
+  prepareForPreview,
+  REDACTION_FAILED_PLACEHOLDER,
+  sanitizeValue,
+} from "./sanitize.js";
 
 export {
   buildActorId,

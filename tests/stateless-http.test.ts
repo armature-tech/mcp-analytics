@@ -52,6 +52,46 @@ test("initialize inside a batch is detected", () => {
   assert.match(session.sessionId, /^mcp_vscode_v__/);
 });
 
+test("run-scoped session seed keeps proxy reconnects in one identity-bearing session", () => {
+  const seed = "11111111-2222-4333-8444-555555555555";
+  const initialize = () => resolveStatelessHttpSession({
+    body: {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { clientInfo: { name: "mcp-tester-claude-remote-proxy", version: "0.1.0" } },
+    },
+    headers: { "X-Armature-Session-Seed": seed },
+  });
+
+  const first = initialize();
+  const reconnected = initialize();
+  assert.equal(first.sessionId, reconnected.sessionId);
+  assert.equal(
+    first.sessionId,
+    `mcp_mcp-tester-claude-remote-proxy_v_0.1.0_${seed}`,
+  );
+  assert.deepEqual(parseStatelessSessionClientInfo(first.sessionId), {
+    name: "mcp-tester-claude-remote-proxy",
+    version: "0.1.0",
+  });
+
+  const call = resolveStatelessHttpSession({
+    body: { jsonrpc: "2.0", id: 2, method: "tools/call" },
+    headers: { "Mcp-Session-Id": first.sessionId, "X-Armature-Session-Seed": seed },
+  });
+  assert.equal(call.sessionId, first.sessionId);
+});
+
+test("invalid session seeds never control the minted identifier", () => {
+  const session = resolveStatelessHttpSession({
+    body: { method: "initialize", params: { clientInfo: { name: "client" } } },
+    headers: { "X-Armature-Session-Seed": "attacker-controlled" },
+  });
+  assert.match(session.sessionId, /^mcp_client_v__[0-9a-f-]{36}$/);
+  assert.doesNotMatch(session.sessionId, /attacker/);
+});
+
 test("tool-call requests recover identity from the echoed header (record and Headers)", () => {
   const issued = buildStatelessSessionId({ name: "claude-code", version: "2.0.13" });
 

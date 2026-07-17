@@ -61,6 +61,8 @@
     "demo": "tsx experimental/mock-env/demo-client.ts",
     "demo:instrumented": "tsx experimental/mock-env/instrumented-demo-client.ts",
     "test": "tsx --test tests/*.test.ts",
+    "test:artifact-canary": "npm run build && node scripts/run-publish-canary.mjs",
+    "test:platform-canary": "node scripts/run-publish-canary.mjs --require-platform",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "check": "npm run typecheck:all && npm test",

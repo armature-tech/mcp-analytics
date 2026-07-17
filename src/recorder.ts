@@ -9,6 +9,7 @@ import type {
   RecordToolCallEvent,
   RegisteredToolHandler,
   RequestExtra,
+  TelemetryMode,
   ToolCallHandler,
   ToolDefinition,
   ToolHandlerContext,
@@ -29,9 +30,11 @@ import {
   resolveActorSeed,
 } from "./emit.js";
 import {
-  appendTelemetryHint,
-  decorateInputSchemaWithTelemetry,
+  applyTelemetryFieldMap,
+  assertTelemetryCaptureConsistent,
   extractTelemetryArguments,
+  isCaptureEnabled,
+  planToolTelemetry,
   TELEMETRY_PROPERTY_DESCRIPTION,
   USER_INTENT_DESCRIPTION,
 } from "./schema.js";
@@ -79,6 +82,7 @@ const createAnalyticsContext = async (
 export const createAnalyticsRecorder = (
   config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
 ): AnalyticsRecorder => {
+  assertTelemetryCaptureConsistent(config);
   const { emitBatch, flush } = createFlushableEmitter(config);
   // Tracks which (actorId, sessionId) pairs have already emitted a session_init,
   // so we emit it at most once per session. Bounded with FIFO eviction: MCP
@@ -101,20 +105,24 @@ export const createAnalyticsRecorder = (
 
   const decorateDefinitions = (defs: ToolDefinition[]) => {
     return defs.map((definition) => {
-      const inputSchema = nudgeTelemetryDescriptions(
-        decorateInputSchemaWithTelemetry(
-          definition.inputSchema ?? { type: "object", properties: {} },
-          config,
-        ),
+      const plan = planToolTelemetry(
+        definition.name,
+        definition.inputSchema ?? { type: "object", properties: {} },
+        config,
       );
+      // Owned/scrub tools pass through undecorated — their advertised schema
+      // and description must keep matching what the handler actually receives.
+      if (plan.mode !== "injected") {
+        return { ...definition, inputSchema: plan.inputSchema };
+      }
       return {
         ...definition,
-        description: appendTelemetryHint(
+        description: plan.applyDescription(
           typeof definition.description === "string"
             ? definition.description
             : undefined,
         ),
-        inputSchema,
+        inputSchema: nudgeTelemetryDescriptions(plan.inputSchema),
       };
     });
   };
@@ -189,13 +197,30 @@ export const createAnalyticsRecorder = (
   };
 
   const recordToolCall = async (event: RecordToolCallEvent) => {
+    // Single choke point for capture-off and field ownership
+    // (TELEMETRY-CONTRACT.md): telemetry handed in by any path — extraction,
+    // direct recordToolCall callers, a cached-schema client — is dropped here
+    // before it can reach the actor resolver, the event builder, `emit`, or
+    // `onError`. A registered tool that owns its telemetry field never exports
+    // supplied telemetry either; the opt-in field map is the explicit way to
+    // export customer fields, and it only applies while capture is on.
+    const ownedTool =
+      registeredTools.get(event.name)?.telemetryMode === "owned";
+    const telemetry = isCaptureEnabled(config)
+      ? applyTelemetryFieldMap(
+          ownedTool ? undefined : event.telemetry,
+          event.args,
+          config.armature?.telemetryFieldMap,
+        )
+      : undefined;
+
     const context = await analyticsContextFor({
       ctx: event.ctx,
       extra: event.extra,
       headers: event.headers ?? event.extra?.requestInfo?.headers,
       authInfo: event.authInfo ?? event.extra?.authInfo,
       toolName: event.name,
-      telemetry: event.telemetry,
+      telemetry,
     });
 
     const finishedAtMs = Date.now();
@@ -217,7 +242,7 @@ export const createAnalyticsRecorder = (
     const workflowRunId = resolveWorkflowRunId(event);
     const toolCallEvent = buildToolCallEvent({
       toolName: event.name,
-      telemetry: event.telemetry,
+      telemetry,
       input: event.args,
       output: event.result,
       status: event.status,
@@ -229,6 +254,7 @@ export const createAnalyticsRecorder = (
       startedAt,
       finishedAt,
       workflowRunId,
+      redact: config.armature?.redact,
     });
 
     // An explicit clientInfo on the event always wins; otherwise look up
@@ -260,6 +286,7 @@ export const createAnalyticsRecorder = (
     {
       registration: ToolRegistration;
       handler: RegisteredToolHandler<unknown, unknown>;
+      telemetryMode: TelemetryMode;
     }
   >();
 
@@ -267,7 +294,10 @@ export const createAnalyticsRecorder = (
     event: InstrumentToolCallEvent,
     handler: ToolCallHandler<T>,
   ): Promise<T> => {
-    const { args, telemetry } = extractTelemetryArguments(event.args);
+    const { args, telemetry } = extractTelemetryArguments(
+      event.args,
+      event.telemetryMode ?? "injected",
+    );
     const startedAtMs = Date.now();
     const startedAt = new Date(startedAtMs).toISOString();
     try {
@@ -311,7 +341,7 @@ export const createAnalyticsRecorder = (
       throw new Error(`Unknown tool: ${name}`);
     }
     return instrumentToolCall<T>(
-      { name, args: rawArgs, ...context },
+      { name, args: rawArgs, telemetryMode: tool.telemetryMode, ...context },
       (args) => tool.handler(args, context) as T | Promise<T>,
     );
   };
@@ -340,26 +370,34 @@ export const createAnalyticsRecorder = (
     handler: RegisteredToolHandler<unknown, unknown>,
   ) => {
     const originalHasInputSchema = registration.inputSchema !== undefined;
-    const decoratedSchema = decorateInputSchemaWithTelemetry(
+    const plan = planToolTelemetry(
+      registration.name,
       registration.inputSchema,
       config,
     );
+    // The MCP SDK passes (args, extra) to the callback whenever the registered
+    // tool has an input schema, and just (extra) when it has none — so the
+    // positional juggling below keys on what we actually registered, which for
+    // owned/scrub tools is the caller's original (possibly absent) schema.
+    const registeredHasInputSchema = plan.inputSchema !== undefined;
+    // Same nudge `decorateDefinitions` applies in the registry path — the
+    // caller-owned McpServer path must also tell agents to pass
+    // telemetry.user_intent, or sessions arrive with no intent (ARM-24).
+    // Owned/scrub tools keep their original description untouched.
+    const description = plan.applyDescription(registration.description);
 
     server.registerTool(
       registration.name,
       {
         ...(registration.title !== undefined ? { title: registration.title } : {}),
-        // Same nudge `decorateDefinitions` applies in the registry path — the
-        // caller-owned McpServer path must also tell agents to pass
-        // telemetry.user_intent, or sessions arrive with no intent (ARM-24).
-        description: appendTelemetryHint(registration.description),
-        inputSchema: decoratedSchema,
+        ...(description !== undefined ? { description } : {}),
+        ...(registeredHasInputSchema ? { inputSchema: plan.inputSchema } : {}),
       } as Parameters<typeof server.registerTool>[1],
       (async (...callbackArgs: unknown[]) => {
         const argsOrExtra = callbackArgs[0];
         const maybeExtra = callbackArgs[1];
-        const rawArgs = originalHasInputSchema ? argsOrExtra : {};
-        const extra = (originalHasInputSchema ? maybeExtra : argsOrExtra) as
+        const rawArgs = registeredHasInputSchema ? argsOrExtra : {};
+        const extra = (registeredHasInputSchema ? maybeExtra : argsOrExtra) as
           | RequestExtra
           | undefined;
         return instrumentToolCall(
@@ -368,8 +406,13 @@ export const createAnalyticsRecorder = (
             args: rawArgs,
             extra,
             sessionId: extra?.sessionId,
+            telemetryMode: plan.mode,
           },
-          (strippedArgs) => handler(strippedArgs, buildHandlerContext(extra)),
+          (strippedArgs) =>
+            handler(
+              originalHasInputSchema ? strippedArgs : {},
+              buildHandlerContext(extra),
+            ),
         );
       }) as Parameters<typeof server.registerTool>[2],
     );
@@ -382,6 +425,11 @@ export const createAnalyticsRecorder = (
     registeredTools.set(registration.name, {
       registration,
       handler: handler as RegisteredToolHandler<unknown, unknown>,
+      telemetryMode: planToolTelemetry(
+        registration.name,
+        registration.inputSchema,
+        config,
+      ).mode,
     });
     if (attachedServer) {
       registerWithServer(

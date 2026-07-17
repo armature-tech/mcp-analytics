@@ -1,10 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { normalizeTelemetryArgs } from "./schema.js";
+import {
+  prepareForPreview,
+  REDACTION_FAILED_PLACEHOLDER,
+} from "./sanitize.js";
 import type {
   AnalyticsEventKind,
   AnalyticsIngestBatch,
   AnalyticsIngestEvent,
   McpClientInfo,
+  RedactFunction,
   RequestExtra,
   TelemetryArgs,
 } from "./types.js";
@@ -63,6 +68,34 @@ const buildToolCallSource = (toolName: string, input: unknown) => {
   return `MCP tool call: ${toolName}\n\nInput:\n${stringifyPreview(input)}`;
 };
 
+// Telemetry text is agent-authored but routinely quotes the user, so the
+// customer redaction hook sees it too. Whatever the hook returns is
+// re-normalized; a throwing hook drops the telemetry entirely (fail closed).
+const redactTelemetry = (
+  telemetry: TelemetryArgs | undefined,
+  redact: RedactFunction | undefined,
+): TelemetryArgs | undefined => {
+  if (telemetry === undefined || !redact) return telemetry;
+  try {
+    return normalizeTelemetryArgs(redact(telemetry) as TelemetryArgs);
+  } catch {
+    return undefined;
+  }
+};
+
+const redactErrorMessage = (
+  errorMessage: string | undefined,
+  redact: RedactFunction | undefined,
+): string | undefined => {
+  if (errorMessage === undefined || !redact) return errorMessage;
+  try {
+    const redacted = redact(errorMessage);
+    return typeof redacted === "string" ? redacted : stringifyPreview(redacted);
+  } catch {
+    return REDACTION_FAILED_PLACEHOLDER;
+  }
+};
+
 // Marks an event as synthetic traffic from an Armature workflow run so
 // Session Analytics can exclude it. Spread first in the event literal —
 // absent when the call did not originate from a workflow run.
@@ -87,6 +120,7 @@ export const buildToolCallEvent = ({
   startedAt,
   finishedAt,
   workflowRunId,
+  redact,
 }: {
   toolName: string;
   telemetry?: TelemetryArgs;
@@ -101,13 +135,23 @@ export const buildToolCallEvent = ({
   startedAt: string;
   finishedAt: string;
   workflowRunId?: string;
+  redact?: RedactFunction;
 }): AnalyticsIngestEvent => {
-  const inputPreview = truncateUtf8(stringifyPreview(input), MAX_PREVIEW_BYTES);
-  const source = truncateUtf8(buildToolCallSource(toolName, input), MAX_SOURCE_BYTES);
-  const resultPreview = output === undefined
+  // Contract pipeline (TELEMETRY-CONTRACT.md): sanitize → customer redact →
+  // stringify → truncate, for every payload that can carry customer data —
+  // input preview, the source built from the input, the result preview, the
+  // error string, and the telemetry text.
+  const safeInput = prepareForPreview(input, redact);
+  const safeOutput = output === undefined
+    ? undefined
+    : prepareForPreview(output, redact);
+  const safeErrorMessage = redactErrorMessage(errorMessage, redact);
+  const inputPreview = truncateUtf8(stringifyPreview(safeInput), MAX_PREVIEW_BYTES);
+  const source = truncateUtf8(buildToolCallSource(toolName, safeInput), MAX_SOURCE_BYTES);
+  const resultPreview = safeOutput === undefined
     ? null
-    : truncateUtf8(stringifyPreview(output), MAX_PREVIEW_BYTES);
-  const t = normalizeTelemetryArgs(telemetry);
+    : truncateUtf8(stringifyPreview(safeOutput), MAX_PREVIEW_BYTES);
+  const t = redactTelemetry(normalizeTelemetryArgs(telemetry), redact);
 
   return {
     ...workflowStamp(workflowRunId),
@@ -119,7 +163,7 @@ export const buildToolCallEvent = ({
     finished_at: finishedAt,
     duration_ms: durationMs,
     ok: status === "ok",
-    error: errorMessage ?? null,
+    error: safeErrorMessage ?? null,
     metadata: {
       tool_name: toolName,
       user_turn: t?.user_turn ?? null,

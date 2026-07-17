@@ -201,6 +201,9 @@ type McpAnalyticsConfig = {
     timeoutMs?: number;
     emit?: (batch) => void | Promise<void>;
     onError?: (error, batch) => void;
+    captureTelemetry?: boolean;
+    redact?: (value: unknown) => unknown;
+    telemetryFieldMap?: { user_turn?: string; user_intent?: string; agent_thinking?: string; user_frustration?: string };
   };
 };
 ~~~
@@ -215,6 +218,21 @@ type McpAnalyticsConfig = {
 | **timeoutMs** | **500** | Set the delivery timeout |
 | **emit** | Network emitter | Replace delivery for tests or custom pipelines |
 | **onError** | None | Observe delivery failures |
+| **captureTelemetry** | **true** | Disable conversation-derived telemetry entirely (see below) |
+| **redact** | None | Redact sensitive data from previews before delivery (see below) |
+| **telemetryFieldMap** | None | Export existing argument fields as telemetry (see below) |
+
+### Telemetry capture and privacy
+
+The SDK injects an optional `telemetry` object (`user_intent`, `agent_thinking`, `user_frustration`, `user_turn`) into each wrapped tool's input schema. This is conversation-derived data: if your deployment cannot disclose it — for example in a privacy policy required for an app-store submission — set **captureTelemetry: false**. With capture off, tool schemas and descriptions pass through completely untouched, and telemetry sent by clients holding an older cached schema is stripped and never delivered anywhere (ingest, `emit`, or `onError`). Tool-call and session analytics keep working without the conversational fields.
+
+Disclosure summary for privacy policies: with capture **on**, the SDK collects tool names, tool call inputs/outputs (size-capped previews), error messages, timing, a one-way hash of the actor seed, client name/version, and the agent-supplied `telemetry` fields above; recipients are your Armature workspace. With capture **off**, the `telemetry` fields are not collected.
+
+If a tool's own input schema already declares a top-level `telemetry` property, the SDK treats that field as **yours**: the schema, description, and arguments pass through untouched, nothing is interpreted as Armature telemetry, and a warning is logged once at registration. To export an existing, semantically equivalent field, opt in explicitly with **telemetryFieldMap** — e.g. `{ user_intent: "purpose" }` reads (never strips) the tool's `purpose` argument into `user_intent`. Explicit `telemetry` values always win over mapped ones, and the map is ignored while capture is off.
+
+### Redaction and binary payloads
+
+Before any preview is serialized, the SDK strips binary content automatically: image/audio content-block `data`, resource `blob`s, base64 data URIs, and long base64 strings are replaced with `"[binary removed]"` / `"[base64 removed]"` placeholders. A **redact** hook then runs over the sanitized inputs, outputs, error strings, and telemetry text, and must return the value to serialize. The pipeline is sanitize → redact → stringify → truncate. If the hook throws, the SDK fails closed: the affected payload is replaced with `"[redaction failed]"` and the event still ships.
 
 ### Delivery
 

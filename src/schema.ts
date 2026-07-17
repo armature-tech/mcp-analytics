@@ -5,6 +5,8 @@ import type {
   InternalMcpAnalyticsConfig,
   JsonObjectSchema,
   TelemetryArgs,
+  TelemetryFieldMap,
+  TelemetryMode,
 } from "./types.js";
 import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
 
@@ -201,6 +203,97 @@ const isStrict = (config: InternalMcpAnalyticsConfig = {}) => {
   );
 };
 
+export const isCaptureEnabled = (config: InternalMcpAnalyticsConfig = {}) => {
+  return config.armature?.captureTelemetry !== false;
+};
+
+// Strict mode demands user_intent on every call; capture-off promises never to
+// collect it. Honoring either one silently would betray the other, so the
+// combination is rejected at recorder construction rather than resolved.
+export const assertTelemetryCaptureConsistent = (
+  config: InternalMcpAnalyticsConfig = {},
+) => {
+  if (!isCaptureEnabled(config) && isStrict(config)) {
+    throw new Error(
+      "MCP analytics: captureTelemetry is false but telemetry.user_intent is \"required\". Remove one of the two settings.",
+    );
+  }
+};
+
+// True when the tool's own input schema declares a top-level `telemetry`
+// property — the customer owns that field and the SDK must not inject, strip,
+// or interpret it (see TELEMETRY-CONTRACT.md, mode "owned").
+export const schemaDeclaresTelemetry = (inputSchema: unknown): boolean => {
+  if (inputSchema === undefined) return false;
+  if (isZodV4ObjectSchema(inputSchema) || isZodV3ObjectSchema(inputSchema)) {
+    const shape = (inputSchema as { shape?: unknown }).shape;
+    return isRecord(shape) && "telemetry" in shape;
+  }
+  if (isJsonObjectSchema(inputSchema)) {
+    return isRecord(inputSchema.properties) && "telemetry" in inputSchema.properties;
+  }
+  if (isRawShape(inputSchema)) {
+    return "telemetry" in inputSchema;
+  }
+  return false;
+};
+
+// One warning per tool name per process: registration re-runs on serverless
+// factory paths, and repeating the warning on every cold start's every tool
+// would drown real logs. Bounded implicitly — tool names are finite.
+const warnedCollisions = new Set<string>();
+
+const warnTelemetryCollision = (toolName: string) => {
+  if (warnedCollisions.has(toolName)) return;
+  warnedCollisions.add(toolName);
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[mcp-analytics] Tool "${toolName}" already declares a top-level "telemetry" input field; leaving the tool untouched and not collecting Armature telemetry for it. Rename the field or configure telemetryFieldMap to export it explicitly.`,
+  );
+};
+
+export type ToolTelemetryPlan = {
+  mode: TelemetryMode;
+  // Decorated schema for "injected"; the caller's original schema (possibly
+  // undefined) for "owned" and "scrub".
+  inputSchema: unknown;
+  // appendTelemetryHint for "injected"; identity otherwise, so tools we do not
+  // collect telemetry for never advertise a telemetry contract.
+  applyDescription: (description: string | undefined) => string | undefined;
+};
+
+// Resolves how the SDK treats one tool's `telemetry` field, once, at
+// registration time. Every integration surface (recorder registry, McpServer
+// prototype patch, Mastra adapter, custom dispatchers) must register and
+// extract with the same plan, so the advertised schema always matches runtime
+// behavior.
+export const planToolTelemetry = (
+  toolName: string,
+  inputSchema: unknown,
+  config: InternalMcpAnalyticsConfig = {},
+): ToolTelemetryPlan => {
+  if (schemaDeclaresTelemetry(inputSchema)) {
+    warnTelemetryCollision(toolName);
+    return {
+      mode: "owned",
+      inputSchema,
+      applyDescription: (description) => description,
+    };
+  }
+  if (!isCaptureEnabled(config)) {
+    return {
+      mode: "scrub",
+      inputSchema,
+      applyDescription: (description) => description,
+    };
+  }
+  return {
+    mode: "injected",
+    inputSchema: decorateInputSchemaWithTelemetry(inputSchema, config),
+    applyDescription: appendTelemetryHint,
+  };
+};
+
 // Loose mode wraps the telemetry object with `.optional()` so callers that omit
 // the `telemetry` key entirely still parse. Strict mode keeps the object itself
 // required (and `user_intent` required inside).
@@ -360,14 +453,69 @@ export const normalizeTelemetryArgs = (
   return normalized;
 };
 
+// Opt-in export of customer-owned argument fields (gap #11): reads — never
+// strips — the mapped top-level argument properties and fills any telemetry
+// field the call didn't already provide explicitly. Values are validated with
+// the same rules as normalizeTelemetryArgs, so a wrong-typed customer field
+// is ignored rather than exported as garbage.
+export const applyTelemetryFieldMap = (
+  telemetry: TelemetryArgs | undefined,
+  args: unknown,
+  fieldMap: TelemetryFieldMap | undefined,
+): TelemetryArgs | undefined => {
+  if (!fieldMap || !isRecord(args)) return telemetry;
+
+  const merged: TelemetryArgs = { ...(telemetry ?? {}) };
+  const argString = (key: string | undefined): string | undefined => {
+    if (key === undefined) return undefined;
+    const value = args[key];
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  };
+
+  if (merged.user_intent === undefined && merged.intent === undefined) {
+    const value = argString(fieldMap.user_intent);
+    if (value !== undefined) merged.user_intent = value;
+  }
+  if (merged.agent_thinking === undefined && merged.context === undefined) {
+    const value = argString(fieldMap.agent_thinking);
+    if (value !== undefined) merged.agent_thinking = value;
+  }
+  if (
+    merged.user_frustration === undefined
+    && merged.frustration_level === undefined
+    && fieldMap.user_frustration !== undefined
+  ) {
+    const value = asFrustration(args[fieldMap.user_frustration]);
+    if (value !== undefined) merged.user_frustration = value;
+  }
+  if (merged.user_turn === undefined && fieldMap.user_turn !== undefined) {
+    const value = args[fieldMap.user_turn];
+    if (typeof value === "number" && Number.isInteger(value) && value >= 1) {
+      merged.user_turn = value;
+    }
+  }
+
+  return Object.keys(merged).length > 0 ? merged : telemetry;
+};
+
+// Mode semantics (TELEMETRY-CONTRACT.md): "injected" strips and exports;
+// "owned" leaves the customer's arguments untouched and exports nothing;
+// "scrub" strips a cached-schema client's telemetry but exports nothing.
 export const extractTelemetryArguments = (
   args: unknown,
+  mode: TelemetryMode = "injected",
 ): ExtractedToolArguments => {
+  if (mode === "owned") {
+    return { args };
+  }
   if (!isRecord(args) || !isRecord(args.telemetry)) {
     return { args };
   }
 
   const { telemetry, ...strippedArgs } = args;
+  if (mode === "scrub") {
+    return { args: strippedArgs };
+  }
   return {
     args: strippedArgs,
     telemetry: normalizeTelemetryArgs(telemetry as TelemetryArgs),
