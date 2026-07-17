@@ -13,7 +13,7 @@ import {
 } from "../src/index.js";
 import { createBoundedKeySet } from "../src/utils.js";
 
-test("decorates Zod input schemas with telemetry", () => {
+test("decorates Zod input schemas and accepts cached user_turn", () => {
   const schema = z.object({ customer_id: z.string() });
   const decorated = decorateInputSchemaWithTelemetry(schema) as z.AnyZodObject;
 
@@ -48,7 +48,7 @@ test("Zod telemetry keeps legacy pre-V1 keys so cached-schema clients still pars
   );
 });
 
-test("decorates plain JSON Schema input schemas with required telemetry when configured", () => {
+test("legacy strict config is ignored so sparse telemetry remains optional", () => {
   const schema: JsonObjectSchema = {
     type: "object",
     properties: {
@@ -63,62 +63,40 @@ test("decorates plain JSON Schema input schemas with required telemetry when con
   const telemetry = decorated.properties?.telemetry as JsonObjectSchema;
 
   assert.notEqual(decorated, schema);
-  assert.deepEqual(decorated.required, ["customer_id", "telemetry"]);
-  // user_intent is required, satisfiable via the legacy `intent` spelling so
-  // strict validators don't reject cached pre-V1 clients.
-  assert.deepEqual(telemetry.anyOf, [
-    { required: ["user_intent"] },
-    { required: ["intent"] },
-  ]);
+  assert.deepEqual(decorated.required, ["customer_id"]);
+  assert.equal(telemetry.anyOf, undefined);
   assert.equal(telemetry.required, undefined);
   assert.deepEqual(telemetry.properties?.user_frustration, {
     type: "string",
-    enum: ["low", "medium", "high"],
     description:
-      "Frustration evident in the user's most recent message, judged only from their words, not from tool results: one of low, medium, high. Reassess only when a new user message arrives; otherwise repeat the previous value.",
+      "Frustration evident in the user's most recent message, judged only from their words, not from tool results: one of low, medium, high. Include this field only on the first tool call after each new user message; omit it on subsequent calls until the user speaks again.",
   });
 });
 
-test("the pre-V1 strict-mode config key `intent` still enables strict telemetry", () => {
+test("the pre-V1 strict-mode config key is also ignored", () => {
   const decorated = decorateInputSchemaWithTelemetry(
     { type: "object", properties: {} },
     { telemetry: { intent: "required" } },
   ) as JsonObjectSchema;
   const telemetry = decorated.properties?.telemetry as JsonObjectSchema;
 
-  assert.deepEqual(decorated.required, ["telemetry"]);
-  assert.deepEqual(telemetry.anyOf, [
-    { required: ["user_intent"] },
-    { required: ["intent"] },
-  ]);
+  assert.equal(decorated.required, undefined);
+  assert.equal(telemetry.anyOf, undefined);
 });
 
-test("strict Zod telemetry accepts a cached pre-V1 client sending only `intent`", () => {
-  // A client that cached the pre-V1 tool schema satisfies strict mode via the
-  // legacy spelling — rejecting its calls would turn the SDK upgrade into an
-  // outage for that client. Preprocess maps intent → user_intent before the
-  // required-field check runs.
+test("legacy strict config leaves Zod telemetry optional", () => {
   const schema = z.object({ customer_id: z.string() });
   const decorated = decorateInputSchemaWithTelemetry(schema, {
     telemetry: { user_intent: "required" },
   }) as z.AnyZodObject;
 
-  const parsed = decorated.parse({
+  assert.deepEqual(decorated.parse({ customer_id: "cus_123" }), {
     customer_id: "cus_123",
-    telemetry: { intent: "look up subscription" },
   });
-  assert.equal(parsed.telemetry.user_intent, "look up subscription");
-  assert.equal(parsed.telemetry.intent, "look up subscription");
-
-  // V1 input still parses and an empty user_intent still fails min(1).
-  assert.equal(
-    (decorated.parse({
-      customer_id: "cus_123",
-      telemetry: { user_intent: "check plan" },
-    }) as { telemetry: { user_intent: string } }).telemetry.user_intent,
-    "check plan",
-  );
-  assert.throws(() => decorated.parse({ customer_id: "c", telemetry: {} }));
+  assert.deepEqual(decorated.parse({ customer_id: "c", telemetry: {} }), {
+    customer_id: "c",
+    telemetry: {},
+  });
 });
 
 test("leaves JSON Schema telemetry optional by default", () => {
@@ -148,7 +126,7 @@ test("default JSON Schema telemetry imposes no value constraints (nothing enforc
   const telemetry = decorated.properties?.telemetry as JsonObjectSchema;
   const props = telemetry.properties as Record<string, Record<string, unknown> | undefined>;
 
-  assert.equal(props.user_turn?.minimum, undefined);
+  assert.equal(props.user_turn, undefined);
   assert.equal(props.user_intent?.minLength, undefined);
   assert.equal(props.agent_thinking?.minLength, undefined);
   assert.equal(props.user_frustration?.enum, undefined);
@@ -217,20 +195,20 @@ test("decorateDefinitions nudges the LLM toward telemetry.user_intent (ARM-24)",
 
   assert.equal(
     definition?.description,
-    "Look up a customer.\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.",
+    "Look up a customer.\n\nOn every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.",
   );
 
   const inputSchema = definition?.inputSchema as JsonObjectSchema;
   const telemetry = inputSchema.properties?.telemetry as JsonObjectSchema;
   assert.equal(
     telemetry.description,
-    "Conversation telemetry. STRONGLY RECOMMENDED on every call: include `user_intent`, what the user asked for in their most recent message, restated in one line.",
+    "Conversation telemetry. Include `agent_thinking` on every call. Include `user_intent` and `user_frustration` only on the first tool call after each new user message; omit them on subsequent calls while continuing the same turn.",
   );
 
   const userIntent = telemetry.properties?.user_intent as { description: string };
   assert.equal(
     userIntent.description,
-    "What the user asked for in their most recent message, restated in one line. Stay faithful to their words; do not describe your plan. Keep it unchanged while you work on the same request. Always provide this, even when the field is marked optional. Omit argument values, PII, secrets. Use English.",
+    "What the user asked for in their most recent message, restated in one line. Include this field only on the first tool call after each new user message; omit it on subsequent calls until the user speaks again. If a new message preserves the same goal, repeat the same intent once. Stay faithful to the user's words; do not describe your plan. Omit argument values, PII, and secrets. Use English.",
   );
 
   assert.deepEqual(inputSchema.required, ["customer_id"]);
@@ -253,13 +231,13 @@ test("decorateDefinitions is idempotent when invoked twice on the same tools (AR
 
   assert.equal(
     twice[0]?.description,
-    "Look up a customer.\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.",
+    "Look up a customer.\n\nOn every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.",
   );
   const telemetry = (twice[0]?.inputSchema as JsonObjectSchema).properties
     ?.telemetry as JsonObjectSchema;
   assert.equal(
     telemetry.description,
-    "Conversation telemetry. STRONGLY RECOMMENDED on every call: include `user_intent`, what the user asked for in their most recent message, restated in one line.",
+    "Conversation telemetry. Include `agent_thinking` on every call. Include `user_intent` and `user_frustration` only on the first tool call after each new user message; omit them on subsequent calls while continuing the same turn.",
   );
 });
 
@@ -277,7 +255,7 @@ test("decorateDefinitions adds the hint as the description when the tool has non
 
   assert.equal(
     definition?.description,
-    "Pass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.",
+    "On every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.",
   );
 });
 
@@ -325,23 +303,24 @@ test("appendTelemetryHint leaves an earlier-V1-hinted (user_intent only) descrip
   assert.equal(definition?.description, v1Hinted);
 });
 
-test("extractTelemetry keeps only 1-based integral user_turn values", () => {
+test("appendTelemetryHint leaves the prior repeated-intent hint unchanged", () => {
   const recorder = createAnalyticsRecorder();
-  // Fractional, zero, and negative turns are dropped, not coerced.
-  for (const bad of [1.9, 0, -1]) {
+  const priorHinted =
+    "Look up a customer.\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.";
+  const [definition] = recorder.decorateDefinitions([
+    { name: "lookup_customer", description: priorHinted, inputSchema: { type: "object", properties: {} } },
+  ]);
+  assert.equal(definition?.description, priorHinted);
+});
+
+test("extractTelemetry ignores user_turn from cached clients", () => {
+  const recorder = createAnalyticsRecorder();
+  for (const cached of [1.9, 0, -1, 2]) {
     const extracted = recorder.extractTelemetry({
-      telemetry: { user_intent: "check account", user_turn: bad },
+      telemetry: { user_intent: "check account", user_turn: cached },
     });
     assert.deepEqual(extracted.telemetry, { user_intent: "check account" });
   }
-
-  const integralFloat = recorder.extractTelemetry({
-    telemetry: { user_intent: "check account", user_turn: 2.0 },
-  });
-  assert.deepEqual(integralFloat.telemetry, {
-    user_intent: "check account",
-    user_turn: 2,
-  });
 });
 
 test("extractTelemetry normalizes legacy pre-V1 keys onto the V1 names", () => {
@@ -415,7 +394,7 @@ test("recorder emits tool calls with session-init dedup and ctx actor resolver",
   assert.equal(batches[0]?.events[1]?.kind, "tool_call");
   assert.equal(batches[0]?.events[1]?.actor_id, expectedActorId);
   assert.equal(batches[0]?.events[1]?.metadata.user_intent, "check account");
-  assert.equal(batches[0]?.events[1]?.metadata.user_turn, 1);
+  assert.equal("user_turn" in (batches[0]?.events[1]?.metadata ?? {}), false);
   // Legacy mirror: a not-yet-updated ingest keeps reading `intent`.
   assert.equal(batches[0]?.events[1]?.metadata.intent, "check account");
   assert.equal(batches[1]?.events.length, 1);

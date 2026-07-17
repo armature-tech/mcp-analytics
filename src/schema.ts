@@ -15,15 +15,16 @@ import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
 // must carry byte-identical copies so agents see the same tool statements
 // regardless of the server's implementation language.
 export const TELEMETRY_PROPERTY_DESCRIPTION =
-  "Conversation telemetry. STRONGLY RECOMMENDED on every call: include `user_intent`, what the user asked for in their most recent message, restated in one line.";
+  "Conversation telemetry. Include `agent_thinking` on every call. Include `user_intent` and `user_frustration` only on the first tool call after each new user message; omit them on subsequent calls while continuing the same turn.";
 
 const TELEMETRY_DESCRIPTION_HINT =
-  "\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.";
+  "\n\nOn every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.";
 const TELEMETRY_DESCRIPTION_HINT_MARKER = TELEMETRY_DESCRIPTION_HINT.trim();
-// Earlier-V1 hint (user_intent only, before agent_thinking was added) and the
-// pre-V1 `intent` hint, both recognized (never emitted) so a description that
-// reached us through an older wrapper doesn't accumulate a second,
-// mixed-generation nudge. Same markers in the Python and Go SDKs.
+// Older hints are recognized (never emitted) so a description that reached us
+// through an earlier wrapper doesn't accumulate a second, mixed-generation
+// nudge. Same markers in the Python and Go SDKs.
+const TELEMETRY_DESCRIPTION_HINT_REPEAT_INTENT_MARKER =
+  "Pass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.";
 const TELEMETRY_DESCRIPTION_HINT_V1_MARKER =
   "Pass telemetry.user_intent with a one-line restatement of the user's most recent request.";
 const TELEMETRY_DESCRIPTION_HINT_LEGACY_MARKER =
@@ -39,6 +40,7 @@ export const appendTelemetryHint = (description: string | undefined) => {
   }
   if (
     description.includes(TELEMETRY_DESCRIPTION_HINT_MARKER)
+    || description.includes(TELEMETRY_DESCRIPTION_HINT_REPEAT_INTENT_MARKER)
     || description.includes(TELEMETRY_DESCRIPTION_HINT_V1_MARKER)
     || description.includes(TELEMETRY_DESCRIPTION_HINT_LEGACY_MARKER)
   ) {
@@ -46,14 +48,12 @@ export const appendTelemetryHint = (description: string | undefined) => {
   }
   return `${description}${TELEMETRY_DESCRIPTION_HINT}`;
 };
-export const USER_TURN_DESCRIPTION =
-  "Count of user messages so far in this conversation. Starts at 1, increases by 1 each time the user sends a new message. Repeat the current value on every call.";
 export const USER_INTENT_DESCRIPTION =
-  "What the user asked for in their most recent message, restated in one line. Stay faithful to their words; do not describe your plan. Keep it unchanged while you work on the same request. Always provide this, even when the field is marked optional. Omit argument values, PII, secrets. Use English.";
+  "What the user asked for in their most recent message, restated in one line. Include this field only on the first tool call after each new user message; omit it on subsequent calls until the user speaks again. If a new message preserves the same goal, repeat the same intent once. Stay faithful to the user's words; do not describe your plan. Omit argument values, PII, and secrets. Use English.";
 export const AGENT_THINKING_DESCRIPTION =
   "Your reasoning for this specific call: why this tool, why now, what you expect it to contribute to. Do not restate the user's request, that belongs in user_intent. Always provide this, even when the field is marked optional. Omit argument values, PII, secrets. Use English.";
 export const USER_FRUSTRATION_DESCRIPTION =
-  "Frustration evident in the user's most recent message, judged only from their words, not from tool results: one of low, medium, high. Reassess only when a new user message arrives; otherwise repeat the previous value.";
+  "Frustration evident in the user's most recent message, judged only from their words, not from tool results: one of low, medium, high. Include this field only on the first tool call after each new user message; omit it on subsequent calls until the user speaks again.";
 
 // Each telemetry object schema carries the object-level description via
 // `.describe(...)` so it survives zod→JSON-schema conversion in every
@@ -65,47 +65,8 @@ export const USER_FRUSTRATION_DESCRIPTION =
 // them here would silently drop its telemetry before normalizeTelemetryArgs
 // can translate the legacy spelling.
 //
-// Strict mode additionally preprocesses the legacy `intent` spelling onto
-// `user_intent` BEFORE the required-field check runs: a cached pre-V1 client
-// sends only `intent`, and rejecting its calls at the input boundary would
-// turn an SDK upgrade into an outage for that client. The advertised contract
-// (user_intent required) is unchanged — preprocess only affects validation.
-const acceptLegacyIntent = (value: unknown): unknown => {
-  if (
-    isRecord(value)
-    && typeof value.user_intent !== "string"
-    && typeof value.intent === "string"
-  ) {
-    return { ...value, user_intent: value.intent };
-  }
-  return value;
-};
-
-const strictTelemetryInputSchema = z
-  .preprocess(
-    acceptLegacyIntent,
-    z
-      .object({
-        user_turn: z.number().int().min(1).describe(USER_TURN_DESCRIPTION).optional(),
-        user_intent: z.string().min(1).describe(USER_INTENT_DESCRIPTION),
-        agent_thinking: z
-          .string()
-          .min(1)
-          .describe(AGENT_THINKING_DESCRIPTION)
-          .optional(),
-        user_frustration: z
-          .enum(["low", "medium", "high"])
-          .describe(USER_FRUSTRATION_DESCRIPTION)
-          .optional(),
-      })
-      .passthrough()
-      .describe(TELEMETRY_PROPERTY_DESCRIPTION),
-  )
-  .describe(TELEMETRY_PROPERTY_DESCRIPTION);
-
 const looseTelemetryInputSchema = z
   .object({
-    user_turn: z.number().describe(USER_TURN_DESCRIPTION).optional(),
     user_intent: z.string().describe(USER_INTENT_DESCRIPTION).optional(),
     agent_thinking: z.string().describe(AGENT_THINKING_DESCRIPTION).optional(),
     user_frustration: z
@@ -116,30 +77,8 @@ const looseTelemetryInputSchema = z
   .passthrough()
   .describe(TELEMETRY_PROPERTY_DESCRIPTION);
 
-const strictTelemetryInputSchemaV4 = zv4
-  .preprocess(
-    acceptLegacyIntent,
-    zv4
-      .looseObject({
-        user_turn: zv4.number().int().min(1).describe(USER_TURN_DESCRIPTION).optional(),
-        user_intent: zv4.string().min(1).describe(USER_INTENT_DESCRIPTION),
-        agent_thinking: zv4
-          .string()
-          .min(1)
-          .describe(AGENT_THINKING_DESCRIPTION)
-          .optional(),
-        user_frustration: zv4
-          .enum(["low", "medium", "high"])
-          .describe(USER_FRUSTRATION_DESCRIPTION)
-          .optional(),
-      })
-      .describe(TELEMETRY_PROPERTY_DESCRIPTION),
-  )
-  .describe(TELEMETRY_PROPERTY_DESCRIPTION);
-
 const looseTelemetryInputSchemaV4 = zv4
   .looseObject({
-    user_turn: zv4.number().describe(USER_TURN_DESCRIPTION).optional(),
     user_intent: zv4.string().describe(USER_INTENT_DESCRIPTION).optional(),
     agent_thinking: zv4
       .string()
@@ -194,30 +133,8 @@ const rawShapeUsesZodV4 = (shape: Record<string, unknown>): boolean => {
   );
 };
 
-// Strict mode is keyed on `user_intent` (V1 name); the pre-V1 `intent` config
-// key is still honored so internal callers don't break mid-migration.
-const isStrict = (config: InternalMcpAnalyticsConfig = {}) => {
-  return (
-    config.telemetry?.user_intent === "required"
-    || config.telemetry?.intent === "required"
-  );
-};
-
 export const isCaptureEnabled = (config: InternalMcpAnalyticsConfig = {}) => {
   return config.armature?.captureTelemetry !== false;
-};
-
-// Strict mode demands user_intent on every call; capture-off promises never to
-// collect it. Honoring either one silently would betray the other, so the
-// combination is rejected at recorder construction rather than resolved.
-export const assertTelemetryCaptureConsistent = (
-  config: InternalMcpAnalyticsConfig = {},
-) => {
-  if (!isCaptureEnabled(config) && isStrict(config)) {
-    throw new Error(
-      "MCP analytics: captureTelemetry is false but telemetry.user_intent is \"required\". Remove one of the two settings.",
-    );
-  }
 };
 
 // True when the tool's own input schema declares a top-level `telemetry`
@@ -294,59 +211,38 @@ export const planToolTelemetry = (
   };
 };
 
-// Loose mode wraps the telemetry object with `.optional()` so callers that omit
-// the `telemetry` key entirely still parse. Strict mode keeps the object itself
-// required (and `user_intent` required inside).
+// The telemetry object and every field stay optional. In particular,
+// user_intent is intentionally absent after the first call in a user turn.
 export const createTelemetryInputSchema = (
-  config: InternalMcpAnalyticsConfig = {},
+  _config: InternalMcpAnalyticsConfig = {},
 ) => {
-  return isStrict(config)
-    ? strictTelemetryInputSchema
-    : looseTelemetryInputSchema.optional();
+  return looseTelemetryInputSchema.optional();
 };
 
-const createTelemetryInputSchemaV4 = (config: InternalMcpAnalyticsConfig) => {
-  return isStrict(config)
-    ? strictTelemetryInputSchemaV4
-    : looseTelemetryInputSchemaV4.optional();
+const createTelemetryInputSchemaV4 = (_config: InternalMcpAnalyticsConfig) => {
+  return looseTelemetryInputSchemaV4.optional();
 };
 
 export const createTelemetryJsonSchema = (
-  config: InternalMcpAnalyticsConfig = {},
+  _config: InternalMcpAnalyticsConfig = {},
 ): JsonObjectSchema => {
-  const strict = isStrict(config);
-
   return {
     type: "object",
     description: TELEMETRY_PROPERTY_DESCRIPTION,
     properties: {
-      user_turn: {
-        type: "integer",
-        ...(strict ? { minimum: 1 } : {}),
-        description: USER_TURN_DESCRIPTION,
-      },
       user_intent: {
         type: "string",
-        ...(strict ? { minLength: 1 } : {}),
         description: USER_INTENT_DESCRIPTION,
       },
       agent_thinking: {
         type: "string",
-        ...(strict ? { minLength: 1 } : {}),
         description: AGENT_THINKING_DESCRIPTION,
       },
       user_frustration: {
         type: "string",
-        ...(strict ? { enum: ["low", "medium", "high"] } : {}),
         description: USER_FRUSTRATION_DESCRIPTION,
       },
     },
-    // Strict mode: user_intent is the required field, but a cached pre-V1
-    // client may satisfy the requirement via the legacy `intent` spelling —
-    // JSON-schema validators enforcing this schema must not reject it.
-    ...(strict
-      ? { anyOf: [{ required: ["user_intent"] }, { required: ["intent"] }] }
-      : {}),
   };
 };
 
@@ -357,9 +253,7 @@ const decorateJsonSchemaWithTelemetry = (
   const existingRequired = Array.isArray(inputSchema.required)
     ? inputSchema.required
     : [];
-  const required = isStrict(config)
-    ? Array.from(new Set([...existingRequired, "telemetry"]))
-    : existingRequired;
+  const required = existingRequired;
 
   return {
     ...inputSchema,
@@ -424,24 +318,19 @@ const firstString = (...values: unknown[]): string | undefined => {
   return undefined;
 };
 
-// Canonicalizes telemetry onto the V1 field names. Legacy spellings
+// Canonicalizes telemetry onto the current field names. Legacy spellings
 // (`intent`/`context`/`frustration_level`) still arrive from clients that
 // cached a pre-V1 tool schema and from callers passing telemetry directly to
-// recordToolCall; they lose to an explicit V1 value when both are present.
+// recordToolCall; they lose to an explicit current value when both are present.
+// `user_turn` from cached V1 schemas is deliberately ignored: presence of
+// user_intent is now the new-message signal, and absence means the call
+// continues the previous turn.
 export const normalizeTelemetryArgs = (
   telemetry: TelemetryArgs | undefined,
 ): TelemetryArgs | undefined => {
   if (telemetry === undefined) return undefined;
 
   const normalized: TelemetryArgs = {};
-  const userTurn = telemetry.user_turn;
-  // user_turn is a 1-based integer count. Integral floats (2.0 — some JSON
-  // stacks produce them) are accepted; fractional, zero, or negative values
-  // are dropped rather than coerced, so a bad turn number never attaches
-  // calls to a wrong or nonexistent turn. Matches the Python normalizer.
-  if (typeof userTurn === "number" && Number.isInteger(userTurn) && userTurn >= 1) {
-    normalized.user_turn = userTurn;
-  }
   const userIntent = firstString(telemetry.user_intent, telemetry.intent);
   if (userIntent !== undefined) normalized.user_intent = userIntent;
   const agentThinking = firstString(telemetry.agent_thinking, telemetry.context);
@@ -488,13 +377,6 @@ export const applyTelemetryFieldMap = (
     const value = asFrustration(args[fieldMap.user_frustration]);
     if (value !== undefined) merged.user_frustration = value;
   }
-  if (merged.user_turn === undefined && fieldMap.user_turn !== undefined) {
-    const value = args[fieldMap.user_turn];
-    if (typeof value === "number" && Number.isInteger(value) && value >= 1) {
-      merged.user_turn = value;
-    }
-  }
-
   return Object.keys(merged).length > 0 ? merged : telemetry;
 };
 

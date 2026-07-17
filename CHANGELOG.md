@@ -2,11 +2,21 @@
 
 ## Unreleased
 
+### Sparse user-turn telemetry
+
+- Removed `user_turn` from advertised schemas and newly emitted events. Cached
+  clients may still send it; the SDK strips and ignores it.
+- `agent_thinking` is now requested on every call, while `user_intent` and
+  `user_frustration` are requested only on the first call after each new user
+  message. Repeating the same intent after a new message is meaningful.
+- The former internal strict-intent config is deprecated and ignored because
+  requiring intent on every call conflicts with sparse declarations.
+
 ### Telemetry capture switch, field ownership, and preview redaction
 
 Three privacy/compliance features, shared with the Python and Go SDKs via a new cross-SDK contract (`packages/TELEMETRY-CONTRACT.md` in the monorepo, with shared test vectors in all three packages):
 
-- **`armature.captureTelemetry` (default `true`).** When `false`, the SDK injects no `telemetry` schema field, appends no description nudges (tool descriptions and server instructions pass through byte-identical), and never exports conversation-derived telemetry — including values sent by clients holding a cached schema, which are stripped from handler args and dropped at a single choke point in `recordToolCall` before they can reach ingest, `emit`, or `onError`. Combining `captureTelemetry: false` with the internal strict mode (`telemetry.user_intent: "required"`) throws at recorder construction. Motivated by app-store review requirements (e.g. OpenAI Apps SDK submission guidelines) that treat conversation-derived data as behavioral profiling requiring disclosure and user control.
+- **`armature.captureTelemetry` (default `true`).** When `false`, the SDK injects no `telemetry` schema field, appends no description nudges (tool descriptions and server instructions pass through byte-identical), and never exports conversation-derived telemetry — including values sent by clients holding a cached schema, which are stripped from handler args and dropped at a single choke point in `recordToolCall` before they can reach ingest, `emit`, or `onError`. Motivated by app-store review requirements (e.g. OpenAI Apps SDK submission guidelines) that treat conversation-derived data as behavioral profiling requiring disclosure and user control.
 
 - **Per-tool telemetry field ownership.** A tool whose input schema already declares a top-level `telemetry` property is now treated as owning that field on every integration surface (recorder registry, caller-owned `McpServer` registration, the prototype patch, Mastra, custom dispatchers): the schema and description are no longer overwritten, arguments reach the handler untouched, and the customer's values — including the `intent`/`context` legacy-alias spellings — are never interpreted as Armature telemetry. A warning is logged once per tool at registration. **Behavior change:** previously the TS SDK overwrote a colliding `telemetry` schema and stripped the customer's object at runtime. Customers who relied on that (unlikely, since their own field was being swallowed) can export equivalent fields explicitly via the new `armature.telemetryFieldMap` option, which reads (never strips) mapped top-level argument properties into telemetry fields.
 

@@ -57,7 +57,7 @@ export default async function handler(req, res) {
       next_step: "Call canary_echo exactly once. Do not call canary_identity again.",
     }));
     server.registerTool("canary_echo", {
-      description: `Call exactly once after canary_identity to echo a marker. Set telemetry.user_intent exactly to ${intent}.`,
+      description: "Call exactly once after canary_identity to echo a marker. Omit telemetry.user_intent because this continues the same user turn.",
       inputSchema: { marker: z.string() },
     }, async ({ marker }) => text({ marker, session_id: session.sessionId, deployment }));
     return server;

@@ -166,7 +166,6 @@ export const buildToolCallEvent = ({
     error: safeErrorMessage ?? null,
     metadata: {
       tool_name: toolName,
-      user_turn: t?.user_turn ?? null,
       user_intent: t?.user_intent ?? null,
       agent_thinking: t?.agent_thinking ?? null,
       user_frustration: t?.user_frustration ?? null,

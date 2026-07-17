@@ -21,6 +21,50 @@ export async function collectSessionEvidence({ base, headers, matches, dispatch,
   }));
 }
 
+export function harnessFamily(session) {
+  const client = String(session?.client_name || "").trim().toLowerCase();
+  if (client === "mcp-tester-claude-remote-proxy" || /claude[ _-]*code/.test(client)) return "claude_code";
+  if (/codex/.test(client)) return "codex";
+  return `unexpected:${client || "unknown"}`;
+}
+
+export function withExpectedHarnesses(dispatch) {
+  const modelIds = [...new Set((dispatch?.runs || []).map((run) => run.modelId))];
+  if (modelIds.length !== 2) {
+    throw new Error(`expected two ordered harness models, got ${modelIds.length}`);
+  }
+  // The dispatch API has always returned Claude first and Codex second. New
+  // deployments also return run.harness explicitly; derive it for canaries
+  // that begin while the platform is still serving the previous API version.
+  const harnessByModel = new Map([
+    [modelIds[0], "claude_code"],
+    [modelIds[1], "codex"],
+  ]);
+  return {
+    ...dispatch,
+    runs: dispatch.runs.map((run) => ({
+      ...run,
+      harness: run.harness || harnessByModel.get(run.modelId),
+    })),
+  };
+}
+
+// A real harness may start a correlated wrong-family fallback attempt before
+// the requested runner succeeds. Require exactly one correct-family session
+// for every dispatched run; extra fallback sessions remain visible in the
+// evidence table and still pass the correlation/error checks in the caller.
+export function selectExpectedHarnessEvidence({ dispatch, evidence }) {
+  return dispatch.runs.map((run) => {
+    const candidates = evidence.filter((item) => (
+      item.workflowRunId === run.runId && harnessFamily(item.session) === run.harness
+    ));
+    if (candidates.length !== 1) {
+      throw new Error(`${run.runId}: expected exactly one ${run.harness} session, got ${candidates.length}`);
+    }
+    return candidates[0];
+  });
+}
+
 export function formatSessionEvidence({ packageName, base, dispatch, evidence }) {
   return [
     "| Package | Wave | Harness model | Workflow run |",

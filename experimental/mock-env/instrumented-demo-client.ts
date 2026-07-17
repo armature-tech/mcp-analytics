@@ -65,7 +65,6 @@ try {
       email: "alice@example.com",
       name: "Alice",
       telemetry: {
-        user_turn: 1,
         user_intent: "Create a customer in the mock Example MCP system.",
         agent_thinking: "Exercise the wrapped mock Example MCP through the ingest batch format.",
         user_frustration: "low",

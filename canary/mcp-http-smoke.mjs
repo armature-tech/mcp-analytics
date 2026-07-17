@@ -49,13 +49,13 @@ async function conversation(label) {
   const listed = await rpc("tools/list", {});
   assert.deepEqual(new Set(listed.result.tools.map(tool => tool.name)), new Set(["canary_identity", "canary_echo"]));
   for (const tool of listed.result.tools) assert.ok(tool.inputSchema.properties.telemetry, `${tool.name} lacks telemetry`);
-  const identity = await rpc("tools/call", { name: "canary_identity", arguments: { telemetry: { user_intent: intent } } });
+  const identity = await rpc("tools/call", { name: "canary_identity", arguments: { telemetry: { user_intent: intent, agent_thinking: "obtain the session identity" } } });
   const identityValue = JSON.parse(identity.result.content[0].text);
   assert.equal(identityValue.session_id, sessionId);
   assert.equal(identityValue.deployment, deployment);
   const echoed = await rpc("tools/call", {
     name: "canary_echo",
-    arguments: { marker: sessionId, telemetry: { user_intent: intent } },
+    arguments: { marker: sessionId, telemetry: { agent_thinking: "verify the session identity is stable" } },
   });
   const echoValue = JSON.parse(echoed.result.content[0].text);
   assert.equal(echoValue.marker, sessionId);

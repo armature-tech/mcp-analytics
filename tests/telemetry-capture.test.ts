@@ -155,7 +155,7 @@ test("recorder drops telemetry end-to-end when capture is off, even from direct 
   assert.equal(event.metadata.user_intent, null);
   assert.equal(event.metadata.agent_thinking, null);
   assert.equal(event.metadata.user_frustration, null);
-  assert.equal(event.metadata.user_turn, null);
+  assert.equal("user_turn" in event.metadata, false);
   assert.equal(event.metadata.intent, null);
   assert.equal(event.metadata.context, null);
 });
@@ -249,7 +249,7 @@ test("applyTelemetryFieldMap never overrides explicit telemetry and validates ty
       { purpose: "mapped", turn: 2, mood: "high" },
       { user_intent: "purpose", user_turn: "turn", user_frustration: "mood" },
     ),
-    { user_intent: "explicit", user_turn: 2, user_frustration: "high" },
+    { user_intent: "explicit", user_frustration: "high" },
   );
   assert.deepEqual(
     applyTelemetryFieldMap(
@@ -269,15 +269,12 @@ test("applyTelemetryFieldMap never overrides explicit telemetry and validates ty
   );
 });
 
-test("strict user_intent together with capture off fails fast", () => {
-  assert.throws(
-    () =>
-      createAnalyticsRecorder({
-        armature: { captureTelemetry: false },
-        telemetry: { user_intent: "required" },
-        // Internal strict-mode key — not part of the public config type.
-      } as never),
-    /captureTelemetry is false/,
+test("legacy strict config is ignored when capture is off", () => {
+  assert.doesNotThrow(() =>
+    createAnalyticsRecorder({
+      armature: { captureTelemetry: false },
+      telemetry: { user_intent: "required" },
+    } as never),
   );
 });
 

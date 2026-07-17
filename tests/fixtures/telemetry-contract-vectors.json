@@ -7,7 +7,7 @@
   },
   "extraction": [
     {
-      "name": "injected_strips_and_exports_v1_fields",
+      "name": "injected_strips_and_exports_current_fields_ignores_cached_user_turn",
       "mode": "injected",
       "args": {
         "q": "x",
@@ -22,7 +22,6 @@
         "q": "x"
       },
       "expect_telemetry": {
-        "user_turn": 3,
         "user_intent": "find x",
         "agent_thinking": "searching",
         "user_frustration": "low"
@@ -63,7 +62,7 @@
       }
     },
     {
-      "name": "injected_drops_invalid_user_turn",
+      "name": "injected_ignores_cached_user_turn",
       "mode": "injected",
       "args": {
         "telemetry": {

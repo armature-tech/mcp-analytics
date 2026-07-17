@@ -65,6 +65,7 @@ export type RedactFunction = (value: unknown) => unknown;
 // argument property names to READ (never strip) from the tool's arguments.
 // An explicit `telemetry` value for the same field wins over the mapping.
 export type TelemetryFieldMap = {
+  /** @deprecated `user_turn` is no longer collected; this mapping is ignored. */
   user_turn?: string;
   user_intent?: string;
   agent_thinking?: string;
@@ -82,7 +83,7 @@ export type McpAnalyticsConfig = {
     onError?: (error: unknown, batch: AnalyticsIngestBatch) => void;
     timeoutMs?: number;
     // Master switch for conversation-derived telemetry (user_intent,
-    // agent_thinking, user_frustration, user_turn). Default true. When false
+    // agent_thinking, user_frustration). Default true. When false
     // the SDK injects no `telemetry` schema field, appends no description
     // nudges, and never exports telemetry values — including values sent by
     // clients holding a cached schema, which are stripped and dropped.
@@ -99,14 +100,14 @@ export type McpAnalyticsConfig = {
 // is off, so strip a cached-schema client's telemetry but export nothing.
 export type TelemetryMode = "injected" | "owned" | "scrub";
 
-// Telemetry schema shape is Armature-owned. The strict-mode flag lives here so
-// internal call sites (and tests) can opt into validation, but it is intentionally
-// absent from the public `McpAnalyticsConfig` surface — customers should not be
-// reaching into telemetry behavior.
+// Telemetry schema shape is Armature-owned. The former strict-mode config is
+// retained only so existing source continues to compile; sparse intent makes
+// required-per-call validation invalid.
 export type InternalMcpAnalyticsConfig = McpAnalyticsConfig & {
+  /** @deprecated Required-per-call intent conflicts with sparse intent declarations and is ignored. */
   telemetry?: {
     user_intent?: "required" | "optional";
-    /** @deprecated Pre-V1 spelling of `user_intent`; still honored. */
+    /** @deprecated Pre-V1 spelling retained for source compatibility; ignored. */
     intent?: "required" | "optional";
   };
 };
@@ -116,6 +117,7 @@ export type InternalMcpAnalyticsConfig = McpAnalyticsConfig & {
 // straight into recordToolCall) and are normalized onto the V1 names by
 // normalizeTelemetryArgs before any event is built.
 export type TelemetryArgs = {
+  /** @deprecated `user_turn` is accepted from cached clients but ignored. */
   user_turn?: number;
   user_intent?: string;
   agent_thinking?: string;

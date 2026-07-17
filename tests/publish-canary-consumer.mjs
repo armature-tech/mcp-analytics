@@ -120,8 +120,8 @@ async function conversation(shape, label, intent) {
     const listed = await client.listTools();
     assert.deepEqual(new Set(listed.tools.map(tool => tool.name)), new Set(["canary_echo", "canary_expected_error"]));
     for (const tool of listed.tools) assert.ok(tool.inputSchema.properties?.telemetry, `${shape}/${tool.name} lacks telemetry schema`);
-    await client.callTool({ name: "canary_echo", arguments: { marker: `${label}/call-1`, telemetry: { user_intent: intent } } });
-    const error = await client.callTool({ name: "canary_expected_error", arguments: { marker: `${label}/call-2`, telemetry: { user_intent: intent } } });
+    await client.callTool({ name: "canary_echo", arguments: { marker: `${label}/call-1`, telemetry: { user_intent: intent, agent_thinking: "exercise the successful path" } } });
+    const error = await client.callTool({ name: "canary_expected_error", arguments: { marker: `${label}/call-2`, telemetry: { agent_thinking: "exercise the expected failure path" } } });
     assert.equal(error.isError, true);
     assert.equal("telemetry" in fixture.received(), false, `${shape} leaked telemetry into handler`);
   } finally {
@@ -174,11 +174,13 @@ try {
     assert.ok(events.length >= Object.keys(factories).length * 4);
     for (const request of sinkRequests) assert.equal(request.authorization, `Bearer ${apiKey}`);
     for (const event of events.filter(event => event.kind === "tool_call")) {
-      assert.ok(event.session_id_hint); assert.ok(event.metadata.intent?.startsWith("sdk-canary/typescript/"));
+      assert.ok(event.session_id_hint); assert.ok(event.metadata.context);
     }
     for (const [intent, expectedSessions] of expectedSessionsByIntent) {
       assert.equal(expectedSessions.size, 2, `${intent}: fixture did not create two sessions`);
-      const toolCalls = events.filter(event => event.kind === "tool_call" && event.metadata.intent === intent);
+      const intentCalls = events.filter(event => event.kind === "tool_call" && event.metadata.intent === intent);
+      assert.equal(intentCalls.length, 2, `${intent}: expected one declared intent per session`);
+      const toolCalls = events.filter(event => event.kind === "tool_call" && expectedSessions.has(event.session_id_hint));
       assert.equal(toolCalls.length, 4, `${intent}: expected two calls in each of two sessions`);
       const actualSessions = new Set(toolCalls.map(event => event.session_id_hint));
       assert.deepEqual(

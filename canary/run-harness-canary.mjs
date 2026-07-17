@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { appendFile } from "node:fs/promises";
-import { collectSessionEvidence, formatSessionEvidence } from "./session-evidence.mjs";
+import {
+  collectSessionEvidence,
+  formatSessionEvidence,
+  harnessFamily,
+  selectExpectedHarnessEvidence,
+  withExpectedHarnesses,
+} from "./session-evidence.mjs";
 
 const arg = name => {
   const index = process.argv.indexOf(name);
@@ -25,7 +31,7 @@ const dispatchResponse = await fetch(`${base}/api/internal/sdk-canary-dispatch`,
   body: JSON.stringify({ package: packageName, marker }),
 });
 assert.ok(dispatchResponse.ok, `harness dispatch failed: HTTP ${dispatchResponse.status}`);
-const dispatch = await dispatchResponse.json();
+const dispatch = withExpectedHarnesses(await dispatchResponse.json());
 assert.equal(dispatch.runs.length, 4);
 assert.equal(new Set(dispatch.runs.map(run => run.runId)).size, 4);
 const dispatchTargetCounts = new Map();
@@ -66,24 +72,24 @@ for (const { session, workflowRunIds, run } of evidence) {
   assert.equal(workflowRunIds.length, 1, `${session.id}: expected exactly one workflow correlation, got ${workflowRunIds.join(", ") || "none"}`);
   assert.ok(run, `${session.id}: session did not correlate to a dispatched workflow run`);
 }
-assert.equal(matches.length, 4, `expected four harness sessions, got ${matches.length}`);
-assert.equal(new Set(matches.map(session => session.session_key)).size, 4, "harness sessions were merged");
-assert.equal(new Set(matches.map(session => session.actor_id)).size, 1, "canary sessions did not use the shared actor seed");
-const harnessFamily = session => {
-  const client = String(session.client_name || "").trim().toLowerCase();
-  if (client === "mcp-tester-claude-remote-proxy" || /claude[ _-]*code/.test(client)) return "claude_code";
-  if (/codex/.test(client)) return "codex";
-  return `unexpected:${client || "unknown"}`;
-};
+assert.ok(matches.length >= 4, `expected at least four harness sessions, got ${matches.length}`);
+assert.equal(new Set(matches.map(session => session.session_key)).size, matches.length, "harness sessions were merged");
+const expectedEvidence = selectExpectedHarnessEvidence({ dispatch, evidence });
+const expectedSessions = expectedEvidence.map(item => item.session);
+assert.equal(new Set(expectedSessions.map(session => session.session_key)).size, 4, "expected harness sessions were merged");
+assert.equal(new Set(expectedSessions.map(session => session.actor_id)).size, 1, "canary sessions did not use the shared actor seed");
 assert.deepEqual(
-  matches.map(harnessFamily).sort(),
+  expectedSessions.map(harnessFamily).sort(),
   ["claude_code", "claude_code", "codex", "codex"],
-  `expected two Claude Code and two Codex sessions, got ${matches.map(session => session.client_name || "unknown").join(", ")}`,
+  `expected two Claude Code and two Codex sessions, got ${expectedSessions.map(session => session.client_name || "unknown").join(", ")}`,
 );
 
 for (const { session } of evidence) {
   assert.ok(session.event_count > 0, `${session.id}: session was empty`);
   assert.equal(session.error_count, 0, `${session.id}: canary tool call failed`);
+}
+if (matches.length > expectedSessions.length) {
+  console.log(`observed ${matches.length - expectedSessions.length} correlated fallback harness session(s)`);
 }
 
 console.log(`verified four isolated Claude Code/Codex sessions for ${packageName}: ${dispatch.runs.map(run => run.runId).join(", ")}`);

@@ -78,8 +78,7 @@ Agent sees:
   email?: string,
   name?: string,
   telemetry: {
-    user_turn?: number,
-    user_intent: string,
+    user_intent?: string,
     agent_thinking?: string,
     user_frustration?: "low" | "medium" | "high"
   }

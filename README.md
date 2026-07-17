@@ -70,7 +70,6 @@ Armature instruments the boundary around every tool call:
 ~~~json
 {
   "telemetry": {
-    "user_turn": 1,
     "user_intent": "Check whether the customer's last payment succeeded",
     "agent_thinking": "The payment lookup tool provides the requested status",
     "user_frustration": "low"
@@ -78,7 +77,7 @@ Armature instruments the boundary around every tool call:
 }
 ~~~
 
-All telemetry fields are optional. The earlier **intent**, **context**, and **frustration_level** names remain accepted for clients with cached schemas.
+All telemetry fields are optional. Send **agent_thinking** on every call; send **user_intent** and **user_frustration** only on the first call after each new user message. Their absence on later calls means the same turn continues. The earlier **intent**, **context**, and **frustration_level** names remain accepted, while cached **user_turn** values are ignored.
 
 > **Privacy:** Armature is observability, not authentication. Keep your existing MCP authentication and authorization in place. Do not put secrets in tool arguments or telemetry fields.
 
@@ -203,7 +202,7 @@ type McpAnalyticsConfig = {
     onError?: (error, batch) => void;
     captureTelemetry?: boolean;
     redact?: (value: unknown) => unknown;
-    telemetryFieldMap?: { user_turn?: string; user_intent?: string; agent_thinking?: string; user_frustration?: string };
+    telemetryFieldMap?: { user_intent?: string; agent_thinking?: string; user_frustration?: string };
   };
 };
 ~~~
@@ -224,7 +223,7 @@ type McpAnalyticsConfig = {
 
 ### Telemetry capture and privacy
 
-The SDK injects an optional `telemetry` object (`user_intent`, `agent_thinking`, `user_frustration`, `user_turn`) into each wrapped tool's input schema. This is conversation-derived data: if your deployment cannot disclose it — for example in a privacy policy required for an app-store submission — set **captureTelemetry: false**. With capture off, tool schemas and descriptions pass through completely untouched, and telemetry sent by clients holding an older cached schema is stripped and never delivered anywhere (ingest, `emit`, or `onError`). Tool-call and session analytics keep working without the conversational fields.
+The SDK injects an optional `telemetry` object (`user_intent`, `agent_thinking`, `user_frustration`) into each wrapped tool's input schema. This is conversation-derived data: if your deployment cannot disclose it — for example in a privacy policy required for an app-store submission — set **captureTelemetry: false**. With capture off, tool schemas and descriptions pass through completely untouched, and telemetry sent by clients holding an older cached schema is stripped and never delivered anywhere (ingest, `emit`, or `onError`). Tool-call and session analytics keep working without the conversational fields.
 
 Disclosure summary for privacy policies: with capture **on**, the SDK collects tool names, tool call inputs/outputs (size-capped previews), error messages, timing, a one-way hash of the actor seed, client name/version, and the agent-supplied `telemetry` fields above; recipients are your Armature workspace. With capture **off**, the `telemetry` fields are not collected.
 

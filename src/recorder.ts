@@ -31,7 +31,6 @@ import {
 } from "./emit.js";
 import {
   applyTelemetryFieldMap,
-  assertTelemetryCaptureConsistent,
   extractTelemetryArguments,
   isCaptureEnabled,
   planToolTelemetry,
@@ -82,7 +81,6 @@ const createAnalyticsContext = async (
 export const createAnalyticsRecorder = (
   config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
 ): AnalyticsRecorder => {
-  assertTelemetryCaptureConsistent(config);
   const { emitBatch, flush } = createFlushableEmitter(config);
   // Tracks which (actorId, sessionId) pairs have already emitted a session_init,
   // so we emit it at most once per session. Bounded with FIFO eviction: MCP
