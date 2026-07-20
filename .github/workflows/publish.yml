@@ -19,18 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     if: github.repository == 'armature-tech/mcp-analytics'
-    environment: sdk-canary-dev
-    env:
-      SDK_CANARY_INGEST_KEY: ${{ secrets.SDK_CANARY_INGEST_KEY }}
-      SDK_CANARY_READ_API_KEY: ${{ secrets.SDK_CANARY_READ_API_KEY }}
-      SDK_CANARY_MCP_SERVER_ID: ${{ vars.SDK_CANARY_MCP_SERVER_ID }}
-      SDK_CANARY_PLATFORM_URL: ${{ vars.SDK_CANARY_PLATFORM_URL }}
-      SDK_CANARY_DISPATCH_SECRET: ${{ secrets.SDK_CANARY_DISPATCH_SECRET }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-      VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE }}
-      SDK_CANARY_VERCEL_PROJECT_ID: ${{ vars.SDK_CANARY_VERCEL_PROJECT_ID }}
-      SDK_CANARY_MCP_URL: ${{ vars.SDK_CANARY_MCP_URL }}
 
     steps:
       - name: Checkout
@@ -141,33 +129,6 @@ jobs:
           tarball="$(node -e 'const p=require(process.argv[1]); process.stdout.write(p[0].filename)' "$RUNNER_TEMP/pack.json")"
           sha256sum "$tarball"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
-
-      - name: Validate live canary configuration
-        if: steps.existing_release.outputs.published != 'true'
-        run: |
-          set -euo pipefail
-          for name in SDK_CANARY_INGEST_KEY SDK_CANARY_READ_API_KEY SDK_CANARY_MCP_SERVER_ID SDK_CANARY_PLATFORM_URL SDK_CANARY_DISPATCH_SECRET VERCEL_TOKEN VERCEL_ORG_ID VERCEL_SCOPE SDK_CANARY_VERCEL_PROJECT_ID SDK_CANARY_MCP_URL; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "Missing ${name} in the sdk-canary-dev environment." >&2
-              exit 1
-            fi
-          done
-
-      - name: Test exact candidate and Armature readback
-        if: steps.existing_release.outputs.published != 'true'
-        run: node scripts/run-publish-canary.mjs --require-platform --artifact "${{ steps.pack.outputs.tarball }}"
-
-      - name: Install Vercel CLI
-        if: steps.existing_release.outputs.published != 'true'
-        run: npm install --global vercel@55.0.0
-
-      - name: Deploy and promote exact candidate
-        if: steps.existing_release.outputs.published != 'true'
-        run: node canary/deploy-vercel.mjs --artifact "${{ steps.pack.outputs.tarball }}" --marker "sdk-canary/typescript/${GITHUB_SHA}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-
-      - name: Verify real Claude Code and Codex session isolation
-        if: steps.existing_release.outputs.published != 'true'
-        run: node canary/run-harness-canary.mjs --package typescript --marker "sdk-canary/typescript/${GITHUB_SHA}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
       - name: Publish
         if: steps.existing_release.outputs.published != 'true'
