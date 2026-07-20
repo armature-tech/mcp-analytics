@@ -314,6 +314,11 @@ expose auth under those names don't need a custom `actorId` resolver.
 `actorId` is configured the normal way on `config.armature.actorId` — the resolver
 receives `ctx` set to Mastra's second-arg context.
 
+Optional verbatim identification uses `actorIdentifier`. It accepts any
+non-empty string up to 8 KiB and emits an identity event only when the value
+changes. The same value is hashed into `actor_id` and sent verbatim as the
+identifier; `actorId` remains the hashed-only fallback when this is absent.
+
 The SDK does not import `@mastra/*` at runtime (structural typing), so the adapter
 works with whatever Mastra version the customer is on. Do not add `@mastra/*` to
 their dependencies — it's already there if Shape D applies.

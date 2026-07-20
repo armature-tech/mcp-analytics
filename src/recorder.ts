@@ -17,6 +17,7 @@ import type {
 } from "./types.js";
 import {
   buildActorId,
+  buildActorIdentityEvent,
   buildBatch,
   buildSessionInitBatch,
   buildToolCallEvent,
@@ -28,6 +29,7 @@ import {
   createFlushableEmitter,
   defaultMcpAnalyticsConfig,
   resolveActorSeed,
+  resolveActorIdentifier,
 } from "./emit.js";
 import {
   applyTelemetryFieldMap,
@@ -81,9 +83,10 @@ const nudgeTelemetryDescriptions = (schema: unknown): unknown => {
 const createAnalyticsContext = async (
   config: McpAnalyticsConfig,
   input: ActorIdResolverInput,
-): Promise<{ actorId: string }> => {
-  const actorSeed = await resolveActorSeed(config, input);
-  return { actorId: buildActorId({ actorSeed }) };
+): Promise<{ actorId: string; actorIdentifier?: string }> => {
+  const actorIdentifier = await resolveActorIdentifier(config, input);
+  const actorSeed = actorIdentifier ?? await resolveActorSeed(config, input);
+  return { actorId: buildActorId({ actorSeed }), actorIdentifier };
 };
 
 export const createAnalyticsRecorder = (
@@ -97,6 +100,26 @@ export const createAnalyticsRecorder = (
   // session_init event_id is now stable per (actorId, sessionId), so a re-emit
   // after eviction collapses to the same id at ingest. 10k × ~60 bytes ≈ 600KB.
   const sessionInitKeys = createBoundedKeySet(10_000);
+  // Per-process change detection. Event ids are content-addressed, so an
+  // identical re-emit after restart is harmless and converges at ingest.
+  const actorIdentifiers = new Map<string, string>();
+  const identityEventFor = (
+    context: Awaited<ReturnType<typeof createAnalyticsContext>>,
+    startedAt: string,
+  ) => {
+    if (context.actorIdentifier === undefined) return undefined;
+    if (actorIdentifiers.get(context.actorId) === context.actorIdentifier) return undefined;
+    actorIdentifiers.set(context.actorId, context.actorIdentifier);
+    if (actorIdentifiers.size > 10_000) {
+      const oldest = actorIdentifiers.keys().next().value;
+      if (oldest !== undefined) actorIdentifiers.delete(oldest);
+    }
+    return buildActorIdentityEvent({
+      actorId: context.actorId,
+      identifier: context.actorIdentifier,
+      startedAt,
+    });
+  };
 
   // Patch the SDK's Server.prototype the first time any recorder is created
   // so that the very next `initialize` handshake feeds the per-session client
@@ -197,6 +220,7 @@ export const createAnalyticsRecorder = (
         ?? getClientInfoForSessionId(sessionId)
         ?? parseStatelessSessionClientInfo(sessionId),
       workflowRunId: resolveWorkflowRunId(event),
+      identityEvent: identityEventFor(context, startedAt),
     });
 
     if (batch) await emitBatch(batch);
@@ -284,6 +308,7 @@ export const createAnalyticsRecorder = (
         sessionInitKeys,
         clientInfo: effectiveClientInfo,
         workflowRunId,
+        identityEvent: identityEventFor(context, startedAt),
       }),
     );
   };

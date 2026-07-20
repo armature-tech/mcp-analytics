@@ -403,6 +403,75 @@ test("recorder emits tool calls with session-init dedup and ctx actor resolver",
   assert.equal(batches[1]?.events[0]?.error, "not found");
 });
 
+test("actor identifier is sent verbatim and emitted only when it changes", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  let identifierResolverCalls = 0;
+  const ctx = { identifier: "Ada <ada@example.com>" };
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorIdentifier: ({ ctx: input }) => {
+        identifierResolverCalls += 1;
+        return (input as typeof ctx).identifier;
+      },
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  const record = (requestId: string) => recorder.recordToolCall({
+    name: "lookup_customer",
+    args: {},
+    ctx,
+    sessionId: "session_identifier",
+    requestId,
+    status: "ok",
+  });
+  await record("request_identifier_1");
+  await record("request_identifier_2");
+  ctx.identifier = "anything-at-all@example.com";
+  await record("request_identifier_3");
+
+  assert.equal(identifierResolverCalls, 3);
+  assert.deepEqual(batches[0]?.events.map((event) => event.kind), [
+    "actor_identity",
+    "session_init",
+    "tool_call",
+  ]);
+  assert.equal(batches[0]?.events[0]?.metadata.identifier, "Ada <ada@example.com>");
+  assert.equal(
+    batches[0]?.events[0]?.actor_id,
+    buildActorId({ actorSeed: "Ada <ada@example.com>" }),
+  );
+  assert.deepEqual(batches[1]?.events.map((event) => event.kind), ["tool_call"]);
+  assert.deepEqual(batches[2]?.events.map((event) => event.kind), [
+    "actor_identity",
+    "session_init",
+    "tool_call",
+  ]);
+  assert.equal(
+    batches[2]?.events[0]?.actor_id,
+    buildActorId({ actorSeed: "anything-at-all@example.com" }),
+  );
+  assert.notEqual(batches[0]?.events[0]?.event_id, batches[2]?.events[0]?.event_id);
+});
+
+test("actor identity is omitted when actorIdentifier is not configured", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: "user",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+  await recorder.recordToolCall({ name: "ping", status: "ok" });
+  assert.equal(batches[0]?.events.some((event) => event.kind === "actor_identity"), false);
+});
+
 test("recorder flush waits for background delivery", async () => {
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = createAnalyticsRecorder({

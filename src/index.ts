@@ -1,6 +1,7 @@
 export type {
   ActorIdResolver,
   ActorIdResolverInput,
+  ActorIdentifierResolver,
   AnalyticsEventKind,
   AnalyticsIngestBatch,
   AnalyticsIngestEvent,
@@ -52,6 +53,7 @@ export {
 
 export {
   buildActorId,
+  buildActorIdentityEvent,
   buildEventId,
   buildSessionInitEvent,
   buildToolCallEvent,

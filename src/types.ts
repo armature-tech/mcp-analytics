@@ -54,6 +54,10 @@ export type ActorIdResolver = (
   input: ActorIdResolverInput,
 ) => string | Promise<string>;
 
+export type ActorIdentifierResolver = (
+  input: ActorIdResolverInput,
+) => string | Promise<string>;
+
 // Applied to sanitized tool inputs/outputs (and the normalized telemetry
 // object and error strings) before they are serialized into event previews.
 // Must return the value to serialize; a throw fails closed (the affected
@@ -77,6 +81,8 @@ export type McpAnalyticsConfig = {
     endpointUrl?: string;
     apiKey?: string;
     actorId?: string | ActorIdResolver;
+    /** Optional caller-provided identifier stored verbatim. */
+    actorIdentifier?: string | ActorIdentifierResolver;
     enabled?: boolean;
     delivery?: "background" | "await";
     emit?: TelemetryEmitter;
@@ -263,7 +269,7 @@ export type AnalyticsRecorder = {
   flush: () => Promise<void>;
 };
 
-export type AnalyticsEventKind = "tool_call" | "session_init";
+export type AnalyticsEventKind = "tool_call" | "session_init" | "actor_identity";
 
 export type AnalyticsIngestEvent = {
   event_id: string;

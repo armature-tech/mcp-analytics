@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Rich actor identification
+
+`armature.actorIdentifier` now supplies one caller-provided string for both the
+hashed `actor_id` and the verbatim identity value. The SDK emits a content-
+addressed `actor_identity` event only when the identifier changes. Existing
+`actorId` configuration remains a hashed-only fallback.
+
 ### Sparse user-turn telemetry
 
 - Removed `user_turn` from advertised schemas and newly emitted events. Cached

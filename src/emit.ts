@@ -44,6 +44,22 @@ export const resolveActorSeed = async (
   return "anonymous";
 };
 
+const MAX_ACTOR_IDENTIFIER_BYTES = 8 * 1024;
+
+/** Resolve the optional caller-provided identifier without interpreting it. */
+export const resolveActorIdentifier = async (
+  config: McpAnalyticsConfig,
+  input: ActorIdResolverInput,
+): Promise<string | undefined> => {
+  const configured = config.armature?.actorIdentifier;
+  if (configured === undefined) return undefined;
+  const value = typeof configured === "function" ? await configured(input) : configured;
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  return new TextEncoder().encode(value).byteLength <= MAX_ACTOR_IDENTIFIER_BYTES
+    ? value
+    : undefined;
+};
+
 export const postTelemetryEvent = async (
   batch: AnalyticsIngestBatch,
   config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,

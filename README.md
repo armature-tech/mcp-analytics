@@ -195,6 +195,7 @@ type McpAnalyticsConfig = {
     endpointUrl?: string;
     apiKey?: string;
     actorId?: string | ((input) => string | Promise<string>);
+    actorIdentifier?: string | ((input) => string | Promise<string>);
     enabled?: boolean;
     delivery?: "background" | "await";
     timeoutMs?: number;
@@ -213,6 +214,7 @@ type McpAnalyticsConfig = {
 | **endpointUrl** | Armature cloud | Override the ingestion endpoint |
 | **apiKey** | **ANALYTICS_INGEST_API_KEY** | Authenticate events and identify the MCP server |
 | **actorId** | Derived from request auth | Supply a stable user or tenant seed |
+| **actorIdentifier** | None | Store a caller-provided identifier verbatim |
 | **enabled** | **true** | Enable or disable instrumentation |
 | **delivery** | **"background"** | Use **"await"** for serverless or short-lived processes |
 | **timeoutMs** | **500** | Set the delivery timeout |
@@ -271,7 +273,7 @@ sequenceDiagram
 
 The SDK injects an optional `telemetry` object (`user_intent`, `agent_thinking`, `user_frustration`) into each wrapped tool's input schema. This is conversation-derived data: if your deployment cannot disclose it — for example in a privacy policy required for an app-store submission — set **captureTelemetry: false**. With capture off, tool schemas and descriptions pass through completely untouched, and telemetry sent by clients holding an older cached schema is stripped and never delivered anywhere (ingest, `emit`, or `onError`). Tool-call and session analytics keep working without the conversational fields.
 
-Disclosure summary for privacy policies: with capture **on**, the SDK collects tool names, tool call inputs/outputs (size-capped previews), error messages, timing, a one-way hash of the actor seed, client name/version, and the agent-supplied `telemetry` fields above; recipients are your Armature workspace. With capture **off**, the `telemetry` fields are not collected.
+Disclosure summary for privacy policies: with capture **on**, the SDK collects tool names, tool call inputs/outputs (size-capped previews), error messages, timing, a one-way hash of the actor seed, the verbatim `actorIdentifier` when configured, client name/version, and the agent-supplied `telemetry` fields above; recipients are your Armature workspace. With capture **off**, the `telemetry` fields are not collected.
 
 If a tool's own input schema already declares a top-level `telemetry` property, the SDK treats that field as **yours**: the schema, description, and arguments pass through untouched, nothing is interpreted as Armature telemetry, and a warning is logged once at registration. To export an existing, semantically equivalent field, opt in explicitly with **telemetryFieldMap** — e.g. `{ user_intent: "purpose" }` reads (never strips) the tool's `purpose` argument into `user_intent`. Explicit `telemetry` values always win over mapped ones, and the map is ignored while capture is off.
 
@@ -291,6 +293,22 @@ If the API key is missing, delivery quietly no-ops for local development.
 By default, the SDK derives an actor seed from request authentication information. You may provide a string or function through **actorId**.
 
 The seed is hashed before transmission. Armature scopes the resulting actor identifier to your server.
+
+Optional **actorIdentifier** attaches one caller-provided string without
+changing the hashed actor id. The SDK does not interpret its contents: it may
+be an internal ID, email, name, or any other non-empty string. It is sent
+verbatim in a separate identity event only when its value changes:
+
+~~~ts
+armature: {
+  actorIdentifier: ({ ctx }) => (ctx as RequestContext).user.externalIdentifier,
+}
+~~~
+
+The SDK hashes **actorIdentifier** into `actor_id` and also sends the original
+value verbatim as `metadata.identifier`. The SDK validates only that it is a
+non-empty string no larger than 8 KiB. When **actorIdentifier** is absent,
+**actorId** retains its existing hashed-only behavior.
 
 ## Environment variables
 

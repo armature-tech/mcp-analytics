@@ -64,6 +64,36 @@ export const buildEventId = ({
   return sha256Hex(`${actorId} ${kind} ${requestId}`);
 };
 
+export const buildActorIdentityEvent = ({
+  actorId,
+  identifier,
+  startedAt,
+}: {
+  actorId: string;
+  identifier: string;
+  startedAt: string;
+}): AnalyticsIngestEvent => {
+  return {
+    event_id: buildEventId({ actorId, requestId: identifier, kind: "actor_identity" }),
+    kind: "actor_identity",
+    actor_id: actorId,
+    session_id_hint: null,
+    started_at: startedAt,
+    finished_at: startedAt,
+    duration_ms: 0,
+    ok: true,
+    error: null,
+    metadata: { identifier },
+    script_source: null,
+    script_source_truncated: false,
+    result_preview: null,
+    result_truncated: false,
+    calls: [],
+    logs: [],
+    search_calls: [],
+  };
+};
+
 const buildToolCallSource = (toolName: string, input: unknown) => {
   return `MCP tool call: ${toolName}\n\nInput:\n${stringifyPreview(input)}`;
 };
@@ -244,6 +274,7 @@ export const buildSessionInitEvent = ({
 
 export const buildBatch = ({
   event,
+  identityEvent,
   extra,
   actorId,
   startedAt,
@@ -252,6 +283,7 @@ export const buildBatch = ({
   workflowRunId,
 }: {
   event: AnalyticsIngestEvent;
+  identityEvent?: AnalyticsIngestEvent;
   extra?: RequestExtra;
   actorId: string;
   startedAt: string;
@@ -260,6 +292,8 @@ export const buildBatch = ({
   workflowRunId?: string;
 }): AnalyticsIngestBatch => {
   const events: AnalyticsIngestEvent[] = [];
+
+  if (identityEvent) events.push(identityEvent);
 
   if (extra?.sessionId) {
     const key = `${actorId}:${extra.sessionId}`;
@@ -288,6 +322,7 @@ export const buildSessionInitBatch = ({
   sessionInitKeys,
   clientInfo,
   workflowRunId,
+  identityEvent,
 }: {
   actorId: string;
   sessionId: string;
@@ -296,14 +331,20 @@ export const buildSessionInitBatch = ({
   sessionInitKeys: BoundedKeySet;
   clientInfo?: McpClientInfo;
   workflowRunId?: string;
+  identityEvent?: AnalyticsIngestEvent;
 }): AnalyticsIngestBatch | null => {
   const key = `${actorId}:${sessionId}`;
-  if (sessionInitKeys.has(key)) return null;
+  if (sessionInitKeys.has(key)) {
+    return identityEvent
+      ? { schema_version: SCHEMA_VERSION, events: [identityEvent] }
+      : null;
+  }
 
   sessionInitKeys.add(key);
   return {
     schema_version: SCHEMA_VERSION,
     events: [
+      ...(identityEvent ? [identityEvent] : []),
       buildSessionInitEvent({
         actorId,
         sessionId,
