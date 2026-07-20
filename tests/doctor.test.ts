@@ -1,0 +1,234 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import {
+  classifyToolInstrumentation,
+  defaultDoctorOptions,
+  detectLocalSdks,
+  inspectToolCoverage,
+  inspectMcp,
+  runDoctor,
+  verifyIngest,
+  type DoctorDependencies,
+  type DoctorTool,
+} from "../src/doctor.js";
+import { parseDoctorArguments } from "../src/doctor-args.js";
+
+const currentTool = (name: string): DoctorTool => ({
+  name,
+  description: "A tool. On every call, pass telemetry.agent_thinking.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      telemetry: {
+        type: "object",
+        description: "Conversation telemetry. Include agent reasoning.",
+        properties: {
+          user_intent: { type: "string" },
+          agent_thinking: { type: "string" },
+          user_frustration: { type: "string" },
+        },
+      },
+    },
+  },
+});
+
+test("classifies current, legacy, owned, and missing tool instrumentation", () => {
+  const legacy: DoctorTool = {
+    name: "legacy",
+    description: "Pass telemetry.intent with a one-line user intent for analytics.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        telemetry: { type: "object", properties: { intent: {}, context: {} } },
+      },
+    },
+  };
+  const owned: DoctorTool = {
+    name: "owned",
+    inputSchema: {
+      type: "object",
+      properties: { telemetry: { type: "string" } },
+    },
+  };
+  assert.equal(classifyToolInstrumentation(currentTool("current")), "current");
+  assert.equal(classifyToolInstrumentation(legacy), "legacy");
+  assert.equal(classifyToolInstrumentation(owned), "owned");
+  assert.equal(classifyToolInstrumentation({ name: "plain", inputSchema: {} }), "missing");
+  assert.deepEqual(inspectToolCoverage([currentTool("a"), legacy, owned, { name: "plain" }]), {
+    current: ["a"],
+    legacy: ["legacy"],
+    owned: ["owned"],
+    missing: ["plain"],
+    total: 4,
+  });
+});
+
+test("parses HTTP and stdio targets without accepting an inline ingest key", () => {
+  const http = parseDoctorArguments([
+    "doctor",
+    "--url",
+    "http://localhost:3000/mcp",
+    "--bearer-env",
+    "MCP_TOKEN",
+    "--json",
+  ], { MCP_TOKEN: "secret" });
+  assert.equal(http.target.kind, "http");
+  assert.equal(http.json, true);
+  if (http.target.kind === "http") {
+    assert.equal(http.target.headers.Authorization, "Bearer secret");
+  }
+
+  const stdio = parseDoctorArguments([
+    "doctor",
+    "--command",
+    "node",
+    "--arg",
+    "server.js",
+    "--arg",
+    "--port",
+    "--capture",
+    "off",
+    "--skip-ingest",
+  ]);
+  assert.equal(stdio.target.kind, "stdio");
+  if (stdio.target.kind === "stdio") assert.deepEqual(stdio.target.args, ["server.js", "--port"]);
+  assert.equal(stdio.expectCapture, false);
+  assert.equal(stdio.skipIngest, true);
+  assert.throws(
+    () => parseDoctorArguments(["doctor", "--url", "http://a", "--command", "node"]),
+    /exactly one/,
+  );
+  assert.throws(
+    () => parseDoctorArguments(["doctor", "--url", "http://a", "--ingest-key", "secret"]),
+    /unknown option/,
+  );
+  assert.throws(
+    () => parseDoctorArguments(["doctor", "--url", "file:\/\/\/tmp\/mcp"]),
+    /http or https/,
+  );
+});
+
+test("detects local TypeScript, Python, and Go SDK declarations", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "armature-doctor-"));
+  try {
+    await writeFile(join(directory, "package.json"), JSON.stringify({
+      dependencies: { "@armature-tech/mcp-analytics": "^0.8.0" },
+    }));
+    await writeFile(join(directory, "pyproject.toml"), 'dependencies = ["armature-mcp-analytics>=0.8"]\n');
+    await writeFile(join(directory, "go.mod"), "module example.com/customer\n\nrequire github.com/armature-tech/mcp-analytics-go v0.8.0\n");
+    const sdks = await detectLocalSdks(directory);
+    assert.deepEqual(sdks.map((sdk) => sdk.language), ["typescript", "python", "go"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ingest probe sends only an empty authenticated batch", async () => {
+  let receivedBody = "";
+  let receivedAuthorization = "";
+  const server = createServer((request, response) => {
+    receivedAuthorization = String(request.headers.authorization || "");
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => { receivedBody += chunk; });
+    request.on("end", () => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"accepted":0,"rejected":[],"schema_version":1}');
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  try {
+    await verifyIngest(`http://127.0.0.1:${address.port}/ingest`, "ami_test_secret", 1000);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+  assert.equal(receivedAuthorization, "Bearer ami_test_secret");
+  assert.deepEqual(JSON.parse(receivedBody), { schema_version: 1, events: [] });
+});
+
+test("ingest probe consumes the response body", async () => {
+  const originalFetch = globalThis.fetch;
+  const response = new Response('{"accepted":0}', {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+  globalThis.fetch = async () => response;
+  try {
+    await verifyIngest("https://example.test/ingest", "ami_test_secret", 1000);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(response.bodyUsed, true);
+});
+
+test("doctor reports healthy only when MCP wrapping and ingest both pass", async () => {
+  const target = { kind: "http" as const, url: "http://localhost:3000/mcp", headers: {} };
+  const options = defaultDoctorOptions(target);
+  const dependencies: DoctorDependencies = {
+    detectLocalSdks: async () => [{ language: "typescript", declaration: "@armature-tech/mcp-analytics ^0.8.0" }],
+    inspectMcp: async () => ({ serverName: "fixture", serverVersion: "1", tools: [currentTool("search")] }),
+    verifyIngest: async () => undefined,
+  };
+  const report = await runDoctor(options, dependencies, {
+    ANALYTICS_INGEST_API_KEY: "ami_test_secret",
+  });
+  assert.equal(report.healthy, true);
+  assert.deepEqual(report.checks.map((check) => check.status), ["pass", "pass", "pass", "pass", "pass"]);
+
+  const broken = await runDoctor(options, {
+    ...dependencies,
+    inspectMcp: async () => ({ tools: [{ name: "unwrapped" }] }),
+  }, {});
+  assert.equal(broken.healthy, false);
+  assert.equal(broken.checks.find((check) => check.id === "tool-wrapping")?.status, "fail");
+  assert.equal(broken.checks.find((check) => check.id === "ingest-auth")?.status, "fail");
+  assert.ok(!JSON.stringify(broken).includes("ami_test_secret"));
+});
+
+test("doctor warns without failing when a tool owns the telemetry field", async () => {
+  const options = {
+    ...defaultDoctorOptions({ kind: "http" as const, url: "http://localhost:3000/mcp", headers: {} }),
+    skipIngest: true,
+  };
+  const report = await runDoctor(options, {
+    detectLocalSdks: async () => [{ language: "typescript", declaration: "@armature-tech/mcp-analytics fixture" }],
+    inspectMcp: async () => ({
+      tools: [{
+        name: "customer_tool",
+        inputSchema: { type: "object", properties: { telemetry: { type: "string" } } },
+      }],
+    }),
+    verifyIngest: async () => undefined,
+  });
+  assert.equal(report.healthy, true);
+  const wrapping = report.checks.find((check) => check.id === "tool-wrapping");
+  assert.equal(wrapping?.status, "warn");
+  assert.match(wrapping?.detail || "", /intentionally untouched: customer_tool/);
+});
+
+test("doctor inspects a real stdio MCP server while draining verbose logs", async () => {
+  const target = {
+    kind: "stdio" as const,
+    command: process.execPath,
+    args: [new URL("./fixtures/doctor-stdio-server.mjs", import.meta.url).pathname, "--chatty"],
+    cwd: process.cwd(),
+  };
+  const options = {
+    ...defaultDoctorOptions(target),
+    skipIngest: true,
+    timeoutMs: 3000,
+  };
+  const report = await runDoctor(options, {
+    detectLocalSdks: async () => [{ language: "typescript", declaration: "@armature-tech/mcp-analytics fixture" }],
+    inspectMcp,
+    verifyIngest: async () => undefined,
+  });
+  assert.equal(report.healthy, true);
+  assert.equal(report.checks.find((check) => check.id === "mcp-initialize")?.status, "pass");
+  assert.equal(report.checks.find((check) => check.id === "tool-wrapping")?.status, "pass");
+});

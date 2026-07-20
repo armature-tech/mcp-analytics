@@ -25,6 +25,9 @@
   ],
   "main": "./dist/cjs/index.js",
   "types": "./dist/cjs/index.d.ts",
+  "bin": {
+    "mcp-analytics": "./dist/esm/cli.js"
+  },
   "exports": {
     ".": {
       "import": {
@@ -63,6 +66,7 @@
     "test": "tsx --test tests/*.test.ts",
     "test:artifact-canary": "npm run build && node scripts/run-publish-canary.mjs",
     "test:platform-canary": "node scripts/run-publish-canary.mjs --require-platform",
+    "doctor": "tsx src/cli.ts doctor",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "check": "npm run typecheck:all && npm test",

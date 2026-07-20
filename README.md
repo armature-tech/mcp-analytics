@@ -28,6 +28,27 @@ Create a server in the [Armature dashboard](https://app.armature.tech), copy its
 export ANALYTICS_INGEST_API_KEY="..."
 ~~~
 
+### Verify the installation locally
+
+Run the doctor against the same environment and MCP server you plan to deploy:
+
+~~~bash
+npx @armature-tech/mcp-analytics doctor --url http://localhost:3000/mcp
+~~~
+
+For a stdio server:
+
+~~~bash
+npx @armature-tech/mcp-analytics doctor --command node --arg dist/server.js
+~~~
+
+The doctor performs an MCP handshake, lists the server's tools, verifies that
+every tool exposes Armature's telemetry contract, and checks the existing
+`ANALYTICS_INGEST_API_KEY` with an empty authenticated batch. The probe creates
+no session and sends no tool arguments, responses, or user content. Add
+`--skip-ingest` for a fully offline check, or `--json` for a support-ready
+machine-readable report.
+
 ### 3. Instrument your MCP server
 
 Wrap the factory that creates your existing **McpServer**:

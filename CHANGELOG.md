@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Local installation doctor
+
+- Added `npx @armature-tech/mcp-analytics doctor` for local, customer-run
+  installation checks. It supports Streamable HTTP and stdio MCP servers,
+  verifies initialize/tools-list behavior and per-tool Armature wrapping, and
+  can validate the configured ingest key with an empty content-free batch.
+- The command prints actionable local diagnostics and supports `--json`; it
+  does not add a dashboard surface or a background diagnostics channel.
+
 ### Rich actor identification
 
 `armature.actorIdentifier` now supplies one caller-provided string for both the

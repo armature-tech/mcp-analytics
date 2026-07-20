@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +37,10 @@ if (supplied >= 0) {
 const consumer = await mkdtemp(join(tmpdir(), "armature-ts-canary-"));
 try {
   await writeFile(join(consumer, "package.json"), JSON.stringify({ type: "module", private: true }));
-  execFileSync("npm", ["install", "--ignore-scripts", artifact, "@modelcontextprotocol/sdk@1.20.0", "zod@3.25.76"], {
+  // Install only the packed artifact. Modern npm must resolve its declared MCP
+  // SDK peer automatically, matching a bare `npx @armature-tech/mcp-analytics`
+  // invocation rather than hiding a missing CLI dependency in the canary.
+  execFileSync("npm", ["install", "--ignore-scripts", artifact], {
     cwd: consumer,
     stdio: "inherit",
   });
@@ -46,6 +49,23 @@ try {
     encoding: "utf8",
   }).trim();
   assert.ok(resolved.startsWith(join(consumer, "node_modules")), `package resolved outside blank consumer: ${resolved}`);
+  const sdkResolved = execFileSync("node", ["-e", "console.log(require.resolve('@modelcontextprotocol/sdk/client/index.js'))"], {
+    cwd: consumer,
+    encoding: "utf8",
+  }).trim();
+  assert.ok(sdkResolved.startsWith(join(consumer, "node_modules")), `MCP SDK peer resolved outside blank consumer: ${sdkResolved}`);
+  const doctorBin = join(
+    consumer,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "mcp-analytics.cmd" : "mcp-analytics",
+  );
+  const doctorHelp = spawnSync(doctorBin, ["doctor", "--help"], {
+    cwd: consumer,
+    encoding: "utf8",
+  });
+  assert.equal(doctorHelp.status, 0, doctorHelp.error?.message || doctorHelp.stderr);
+  assert.match(`${doctorHelp.stdout}${doctorHelp.stderr}`, /Armature MCP analytics doctor/);
   await copyFile(join(packageRoot, "tests", "publish-canary-consumer.mjs"), join(consumer, "canary.mjs"));
   execFileSync(process.execPath, [join(consumer, "canary.mjs")], {
     cwd: consumer,

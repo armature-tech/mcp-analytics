@@ -340,6 +340,20 @@ already has a custom `initialize` handler — otherwise skip it.
 
 Two checks. Don't skip them.
 
+Start with the packaged local doctor whenever the server can be launched over
+Streamable HTTP or stdio:
+
+```bash
+npx @armature-tech/mcp-analytics doctor --url http://localhost:3000/mcp
+# or: npx @armature-tech/mcp-analytics doctor --command node --arg dist/server.js
+```
+
+Run it with the same `ANALYTICS_INGEST_API_KEY` and
+`ANALYTICS_INGEST_URL` environment as the server. It verifies the MCP
+handshake, every served tool's public wrapping contract, and ingest auth using
+an empty content-free batch. Use `--skip-ingest` only when the user explicitly
+wants an offline check. Include the doctor result in the handoff.
+
 **Check 1 — Schema includes telemetry.** Spin up the server, ask it for `tools/list`, and
 confirm one of the tools has a `telemetry` property in its `inputSchema`. If the project
 has a dev server script, use it; otherwise write a 10-line script that imports the factory
