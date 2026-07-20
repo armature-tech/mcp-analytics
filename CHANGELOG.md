@@ -12,6 +12,10 @@
 - The former internal strict-intent config is deprecated and ignored because
   requiring intent on every call conflicts with sparse declarations.
 
+### Opt-in capability request tool
+
+- **`armature.requestCapability` (default `false`).** When enabled with a configured delivery path, the SDK dynamically injects a reserved `request_capability` tool across the recorder, `McpServer`, factory-wrapper, caller-owned registry, and Mastra integration paths. Agents call it with one required `capability` string when the available tools cannot complete the user's request. The call is acknowledged and emitted as a provenance-marked normal tool-call event; ingest routes it into the existing unmet-demand clustering pipeline. Global analytics disablement suppresses the tool, and name collisions fail explicitly.
+
 ### Telemetry capture switch, field ownership, and preview redaction
 
 Three privacy/compliance features, shared with the Python and Go SDKs via a new cross-SDK contract (`packages/TELEMETRY-CONTRACT.md` in the monorepo, with shared test vectors in all three packages):

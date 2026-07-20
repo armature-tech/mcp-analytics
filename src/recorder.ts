@@ -45,6 +45,14 @@ import {
   installClientInfoCapture,
 } from "./client-info-cache.js";
 import { parseStatelessSessionClientInfo } from "./stateless-http.js";
+import {
+  handleRequestCapability,
+  isRequestCapabilityEnabled,
+  REQUEST_CAPABILITY_DESCRIPTION,
+  REQUEST_CAPABILITY_INPUT_SCHEMA,
+  REQUEST_CAPABILITY_TOOL_NAME,
+  REQUEST_CAPABILITY_ZOD_SHAPE,
+} from "./request-capability.js";
 
 const nudgeTelemetryDescriptions = (schema: unknown): unknown => {
   if (!isJsonObjectSchema(schema)) return schema;
@@ -252,6 +260,7 @@ export const createAnalyticsRecorder = (
       startedAt,
       finishedAt,
       workflowRunId,
+      capabilityRequest: event.capabilityRequest,
       redact: config.armature?.redact,
     });
 
@@ -285,6 +294,7 @@ export const createAnalyticsRecorder = (
       registration: ToolRegistration;
       handler: RegisteredToolHandler<unknown, unknown>;
       telemetryMode: TelemetryMode;
+      internal: boolean;
     }
   >();
 
@@ -339,7 +349,13 @@ export const createAnalyticsRecorder = (
       throw new Error(`Unknown tool: ${name}`);
     }
     return instrumentToolCall<T>(
-      { name, args: rawArgs, telemetryMode: tool.telemetryMode, ...context },
+      {
+        name,
+        args: rawArgs,
+        telemetryMode: tool.telemetryMode,
+        capabilityRequest: tool.internal,
+        ...context,
+      },
       (args) => tool.handler(args, context) as T | Promise<T>,
     );
   };
@@ -366,13 +382,20 @@ export const createAnalyticsRecorder = (
     server: McpServer,
     registration: ToolRegistration,
     handler: RegisteredToolHandler<unknown, unknown>,
+    internal = false,
   ) => {
     const originalHasInputSchema = registration.inputSchema !== undefined;
-    const plan = planToolTelemetry(
-      registration.name,
-      registration.inputSchema,
-      config,
-    );
+    const plan = internal
+      ? {
+          mode: "scrub" as const,
+          inputSchema: registration.inputSchema,
+          applyDescription: (description: string | undefined) => description,
+        }
+      : planToolTelemetry(
+          registration.name,
+          registration.inputSchema,
+          config,
+        );
     // The MCP SDK passes (args, extra) to the callback whenever the registered
     // tool has an input schema, and just (extra) when it has none — so the
     // positional juggling below keys on what we actually registered, which for
@@ -405,6 +428,7 @@ export const createAnalyticsRecorder = (
             extra,
             sessionId: extra?.sessionId,
             telemetryMode: plan.mode,
+            capabilityRequest: internal,
           },
           (strippedArgs) =>
             handler(
@@ -420,6 +444,14 @@ export const createAnalyticsRecorder = (
     registration: ToolRegistration,
     handler: RegisteredToolHandler<TArgs, TResult>,
   ) => {
+    if (
+      isRequestCapabilityEnabled(config)
+      && registration.name === REQUEST_CAPABILITY_TOOL_NAME
+    ) {
+      throw new Error(
+        `Tool name "${REQUEST_CAPABILITY_TOOL_NAME}" is reserved while armature.requestCapability is enabled.`,
+      );
+    }
     registeredTools.set(registration.name, {
       registration,
       handler: handler as RegisteredToolHandler<unknown, unknown>,
@@ -428,12 +460,14 @@ export const createAnalyticsRecorder = (
         registration.inputSchema,
         config,
       ).mode,
+      internal: false,
     });
     if (attachedServer) {
       registerWithServer(
         attachedServer,
         registration,
         handler as RegisteredToolHandler<unknown, unknown>,
+        false,
       );
     }
     return (rawArgs: unknown, context: ToolHandlerContext = {}) =>
@@ -445,8 +479,8 @@ export const createAnalyticsRecorder = (
       throw new Error("This recorder is already attached to an McpServer.");
     }
     attachedServer = server;
-    for (const { registration, handler } of registeredTools.values()) {
-      registerWithServer(server, registration, handler);
+    for (const { registration, handler, internal } of registeredTools.values()) {
+      registerWithServer(server, registration, handler, internal);
     }
     return server;
   };
@@ -456,22 +490,43 @@ export const createAnalyticsRecorder = (
   };
 
   const toolDefinitions = () => {
-    return decorateDefinitions(
-      Array.from(registeredTools.values()).map(({ registration }) => {
-        const definition: ToolDefinition = { name: registration.name };
-        if (registration.title !== undefined) definition.title = registration.title;
-        if (registration.description !== undefined) {
-          definition.description = registration.description;
-        }
-        if (registration.inputSchema !== undefined) {
-          definition.inputSchema = registration.inputSchema;
-        }
-        return definition;
-      }),
-    );
+    const definitions: ToolDefinition[] = [];
+    for (const { registration, internal } of registeredTools.values()) {
+      if (internal) {
+        definitions.push({
+          name: REQUEST_CAPABILITY_TOOL_NAME,
+          description: REQUEST_CAPABILITY_DESCRIPTION,
+          inputSchema: REQUEST_CAPABILITY_INPUT_SCHEMA,
+        });
+        continue;
+      }
+      const definition: ToolDefinition = { name: registration.name };
+      if (registration.title !== undefined) definition.title = registration.title;
+      if (registration.description !== undefined) {
+        definition.description = registration.description;
+      }
+      if (registration.inputSchema !== undefined) {
+        definition.inputSchema = registration.inputSchema;
+      }
+      definitions.push(...decorateDefinitions([definition]));
+    }
+    return definitions;
   };
 
   const hasTool = (name: string) => registeredTools.has(name);
+
+  if (isRequestCapabilityEnabled(config)) {
+    registeredTools.set(REQUEST_CAPABILITY_TOOL_NAME, {
+      registration: {
+        name: REQUEST_CAPABILITY_TOOL_NAME,
+        description: REQUEST_CAPABILITY_DESCRIPTION,
+        inputSchema: REQUEST_CAPABILITY_ZOD_SHAPE,
+      },
+      handler: handleRequestCapability,
+      telemetryMode: "scrub",
+      internal: true,
+    });
+  }
 
   return {
     decorateDefinitions,

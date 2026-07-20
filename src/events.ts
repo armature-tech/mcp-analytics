@@ -120,6 +120,7 @@ export const buildToolCallEvent = ({
   startedAt,
   finishedAt,
   workflowRunId,
+  capabilityRequest,
   redact,
 }: {
   toolName: string;
@@ -135,6 +136,7 @@ export const buildToolCallEvent = ({
   startedAt: string;
   finishedAt: string;
   workflowRunId?: string;
+  capabilityRequest?: boolean;
   redact?: RedactFunction;
 }): AnalyticsIngestEvent => {
   // Contract pipeline (TELEMETRY-CONTRACT.md): sanitize → customer redact →
@@ -175,6 +177,7 @@ export const buildToolCallEvent = ({
       context: t?.agent_thinking ?? null,
       frustration_level: t?.user_frustration ?? null,
       input_preview: inputPreview.value,
+      ...(capabilityRequest ? { capability_request: true } : {}),
     },
     script_source: source.value,
     script_source_truncated: source.truncated,

@@ -203,6 +203,7 @@ type McpAnalyticsConfig = {
     captureTelemetry?: boolean;
     redact?: (value: unknown) => unknown;
     telemetryFieldMap?: { user_intent?: string; agent_thinking?: string; user_frustration?: string };
+    requestCapability?: boolean;
   };
 };
 ~~~
@@ -220,6 +221,51 @@ type McpAnalyticsConfig = {
 | **captureTelemetry** | **true** | Disable conversation-derived telemetry entirely (see below) |
 | **redact** | None | Redact sensitive data from previews before delivery (see below) |
 | **telemetryFieldMap** | None | Export existing argument fields as telemetry (see below) |
+| **requestCapability** | **false** | Inject `request_capability` so agents can report an unmet tool need |
+
+### Capability requests
+
+Set **requestCapability: true** to add an SDK-owned `request_capability` tool
+to the advertised tool list. The tool accepts one required `capability` string
+and uses this description exactly:
+
+> Request a capability that is not provided by the currently available tools. Use this when a capability is required to complete the user’s request and no existing tool can perform it.
+
+Calls are recorded through the normal analytics pipeline and feed Armature's
+unmet-demand signals. The option is off by default and is also suppressed when
+**enabled: false** or no API key/custom **emit** delivery is configured. While
+active, `request_capability` is reserved; rename a
+customer-defined tool with the same name before enabling it.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant SDK as Armature SDK
+    participant MCP as MCP server
+    participant Agent
+    participant Ingest as Armature ingest
+    participant Demand as Demand pipeline
+
+    App->>SDK: Construct server with requestCapability enabled
+    SDK->>SDK: Check analytics enabled and delivery configured
+    alt Injection is disabled or cannot deliver
+        SDK-->>App: Return server without request_capability
+    else Injection is active
+        SDK->>MCP: Check reserved tool name
+        alt Name collision
+            SDK-->>App: Raise explicit configuration error
+        else Name is available
+            SDK->>MCP: Register request_capability schema and handler
+            Agent->>MCP: List tools
+            MCP-->>Agent: Advertise request_capability
+            Agent->>MCP: Call request_capability(capability)
+            MCP->>SDK: Record provenance-marked tool_call
+            MCP-->>Agent: Capability request acknowledged
+            SDK->>Ingest: Deliver analytics event
+            Ingest->>Demand: Add non-workflow request as failed_intent
+        end
+    end
+```
 
 ### Telemetry capture and privacy
 

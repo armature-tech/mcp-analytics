@@ -15,6 +15,7 @@ import { planToolTelemetry } from "./schema.js";
 import type { TelemetryMode } from "./types.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
 import { deriveToolResultError, isRecord } from "./utils.js";
+import { isRequestCapabilityEnabled } from "./request-capability.js";
 
 type WithAnalyticsContext = {
   config: McpAnalyticsConfig;
@@ -228,6 +229,29 @@ export const withMcpAnalytics = <ServerFactoryResult>(
     { config, recorder },
     createServer,
   );
+  // Customer tools registered inside the factory are handled by the
+  // prototype patch above. The opt-in SDK-owned tool lives in the recorder's
+  // private registry, so attach only after leaving AsyncLocalStorage: this
+  // registers it once without adding telemetry fields or mutating its exact
+  // description.
+  if (isRequestCapabilityEnabled(config) && !(result instanceof McpServer)) {
+    throw new Error(
+      "armature.requestCapability requires the server factory to return an McpServer instance.",
+    );
+  }
+  if (isRequestCapabilityEnabled(config) && result instanceof McpServer) {
+    try {
+      recorder.attachToMcpServer(result);
+    } catch (error) {
+      if (error instanceof Error && /already registered/i.test(error.message)) {
+        throw new Error(
+          'Tool name "request_capability" is reserved while armature.requestCapability is enabled.',
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+  }
   return { result, recorder };
 };
 

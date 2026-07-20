@@ -90,6 +90,9 @@ export type McpAnalyticsConfig = {
     captureTelemetry?: boolean;
     redact?: RedactFunction;
     telemetryFieldMap?: TelemetryFieldMap;
+    // Opt in to an SDK-owned request_capability tool that lets agents report
+    // a capability absent from the server's current tool set. Default false.
+    requestCapability?: boolean;
   };
 };
 
@@ -179,6 +182,8 @@ export type RecordToolCallEvent = {
   error?: unknown;
   clientInfo?: McpClientInfo;
   workflowRunId?: string;
+  // Internal provenance marker for the SDK-owned request_capability tool.
+  capabilityRequest?: boolean;
 };
 
 export type InstrumentToolCallEvent = {
@@ -196,6 +201,7 @@ export type InstrumentToolCallEvent = {
   // "injected" — integrations that decorate schemas themselves (Mastra, the
   // prototype patch) pass the mode their planToolTelemetry call resolved.
   telemetryMode?: TelemetryMode;
+  capabilityRequest?: boolean;
 };
 
 export type ToolCallHandler<T> = (args: unknown) => T | Promise<T>;

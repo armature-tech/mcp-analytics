@@ -1,4 +1,5 @@
 import { createAnalyticsRecorder } from "./recorder.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { planToolTelemetry } from "./schema.js";
 import type {
   AnalyticsRecorder,
@@ -8,6 +9,13 @@ import type {
   RequestExtra,
 } from "./types.js";
 import { isRecord } from "./utils.js";
+import { z } from "zod";
+import {
+  isRequestCapabilityEnabled,
+  REQUEST_CAPABILITY_ARGUMENT_DESCRIPTION,
+  REQUEST_CAPABILITY_DESCRIPTION,
+  REQUEST_CAPABILITY_TOOL_NAME,
+} from "./request-capability.js";
 
 // `inputData` and `context` are `any` (not `unknown`) on purpose. Mastra's
 // `createTool({...}).execute` is typed
@@ -214,8 +222,63 @@ export const wrapMastraToolsWithRecorder = <T extends MastraToolMap>(
   options: { resolveExtra?: MastraAdapterOptions["resolveExtra"] } = {},
 ): T => {
   const out: MastraToolMap = {};
+  const requestCapabilityEnabled = isRequestCapabilityEnabled(config);
+  if (requestCapabilityEnabled !== recorder.hasTool(REQUEST_CAPABILITY_TOOL_NAME)) {
+    throw new Error(
+      "request_capability configuration does not match the supplied analytics recorder.",
+    );
+  }
+  if (
+    requestCapabilityEnabled
+    && Object.entries(tools).some(
+      ([key, tool]) => key === REQUEST_CAPABILITY_TOOL_NAME
+        || tool.id === REQUEST_CAPABILITY_TOOL_NAME,
+    )
+  ) {
+    throw new Error(
+      `Tool name "${REQUEST_CAPABILITY_TOOL_NAME}" is reserved while armature.requestCapability is enabled.`,
+    );
+  }
   for (const [key, tool] of Object.entries(tools)) {
     out[key] = wrapOneTool(key, tool, recorder, config, options.resolveExtra);
+  }
+  if (requestCapabilityEnabled) {
+    out[REQUEST_CAPABILITY_TOOL_NAME] = {
+      id: REQUEST_CAPABILITY_TOOL_NAME,
+      description: REQUEST_CAPABILITY_DESCRIPTION,
+      inputSchema: z.object({
+        capability: z
+          .string()
+          .min(1)
+          .max(1000)
+          .describe(REQUEST_CAPABILITY_ARGUMENT_DESCRIPTION),
+      }),
+      execute: async (inputData, mastraContext) => {
+        const extra = mergeExtra(
+          defaultMastraResolveExtra(mastraContext),
+          options.resolveExtra?.(mastraContext),
+        );
+        const result = await recorder.dispatch<CallToolResult>(
+          REQUEST_CAPABILITY_TOOL_NAME,
+          inputData,
+          {
+            ctx: mastraContext,
+            extra,
+            sessionId: extra?.sessionId,
+            authInfo: extra?.authInfo,
+            headers: extra?.requestInfo?.headers,
+          },
+        );
+        const text = result.content.find((content) => content.type === "text")?.text;
+        if (result.isError) {
+          throw new Error(text ?? "capability request failed");
+        }
+        // Mastra's MCPServer turns raw tool output into CallToolResult content.
+        // Returning the dispatcher's CallToolResult here would JSON-stringify
+        // and double-wrap it as text.
+        return text ?? "Capability request acknowledged.";
+      },
+    };
   }
   return out as T;
 };
