@@ -10,6 +10,7 @@ import {
   createAnalyticsRecorder,
   extractTelemetryArguments,
   planToolTelemetry,
+  prepareForPreview,
   sanitizeValue,
   schemaDeclaresTelemetry,
   BASE64_REMOVED_PLACEHOLDER,
@@ -18,6 +19,7 @@ import {
   type JsonObjectSchema,
   type TelemetryMode,
 } from "../src/index.js";
+import { isRecord, stringifyPreview, truncateUtf8 } from "../src/utils.js";
 
 type ExtractionVector = {
   name: string;
@@ -33,6 +35,11 @@ type SanitizationVector = {
   expect: unknown;
 };
 
+type SecretRedactionVector = Omit<SanitizationVector, "value"> & {
+  value?: unknown;
+  value_parts?: string[];
+};
+
 const vectors = JSON.parse(
   readFileSync(
     join(
@@ -45,6 +52,7 @@ const vectors = JSON.parse(
 ) as {
   extraction: ExtractionVector[];
   sanitization: SanitizationVector[];
+  secret_redaction: SecretRedactionVector[];
 };
 
 test("cross-SDK contract: extraction vectors", () => {
@@ -63,6 +71,25 @@ test("cross-SDK contract: sanitization vectors", () => {
   for (const vector of vectors.sanitization) {
     assert.deepEqual(sanitizeValue(vector.value), vector.expect, vector.name);
   }
+});
+
+test("cross-SDK contract: sanitize plus built-in secret vectors", () => {
+  for (const vector of vectors.secret_redaction) {
+    const value = vector.value_parts?.join("") ?? vector.value;
+    const actual = prepareForPreview(value);
+    assert.deepEqual(actual, vector.expect, vector.name);
+  }
+});
+
+test("redactSecrets can be disabled without disabling binary sanitization", () => {
+  assert.deepEqual(
+    prepareForPreview(
+      { token: "sk-proj-AbCdEfGhIjKlMnOpQrStUv123456", blob: "QUFB" },
+      undefined,
+      { redactSecrets: false },
+    ),
+    { token: "sk-proj-AbCdEfGhIjKlMnOpQrStUv123456", blob: "[binary removed]" },
+  );
 });
 
 test("sanitizeValue keeps shared-but-acyclic content and cuts true cycles", () => {
@@ -334,4 +361,69 @@ test("a throwing redact hook fails closed instead of leaking the payload", () =>
   assert.equal(event.error, REDACTION_FAILED_PLACEHOLDER);
   assert.equal(event.metadata.user_intent, null);
   assert.doesNotMatch(event.script_source as string, /leak me not/);
+});
+
+test("tool events protect error and telemetry text before the legacy hook", () => {
+  const seen: unknown[] = [];
+  const awsKey = "AKIAIOSFODNN7EXAMPLE";
+  const event = buildToolCallEvent({
+    toolName: "deploy",
+    input: { authorization: "Bearer abcdef1234567890abcdef" },
+    output: { ok: false },
+    errorMessage: `failed with ${awsKey}`,
+    telemetry: {
+      user_intent: `deploy using ${awsKey}`,
+      agent_thinking: "password=hunter2",
+    },
+    status: "error",
+    durationMs: 1,
+    actorId: "actor",
+    requestId: "request",
+    startedAt: new Date(0).toISOString(),
+    finishedAt: new Date(1).toISOString(),
+    redact: (value) => {
+      seen.push(value);
+      return value;
+    },
+  });
+
+  assert.equal(event.error, "failed with [redacted:aws-access-key-id]");
+  assert.equal(event.metadata.user_intent, "deploy using [redacted:aws-access-key-id]");
+  assert.equal(event.metadata.agent_thinking, "password=[redacted:sensitive-kv]");
+  assert.equal(JSON.stringify(seen).includes(awsKey), false);
+});
+
+const unboundedSanitize = (value: unknown, seen = new WeakSet<object>()): unknown => {
+  if (typeof value !== "object" || value === null) return value;
+  if (seen.has(value)) return "[circular]";
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) return value.map((item) => unboundedSanitize(item, seen));
+    if (!isRecord(value)) return value;
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      out[key] = unboundedSanitize(entry, seen);
+    }
+    return out;
+  } finally {
+    seen.delete(value);
+  }
+};
+
+test("bounded sanitization preserves the 32 KB serialization horizon and truncation flags", () => {
+  const payload = {
+    prefix: "kept",
+    body: "not-base64 content ".repeat(160_000),
+    tail: "never reached",
+  };
+  const boundedText = stringifyPreview(sanitizeValue(payload));
+  const unboundedText = stringifyPreview(unboundedSanitize(payload));
+  assert.equal(boundedText.slice(0, 32_768), unboundedText.slice(0, 32_768));
+
+  const boundedPreview = truncateUtf8(boundedText, 8 * 1024);
+  const unboundedPreview = truncateUtf8(unboundedText, 8 * 1024);
+  const boundedSource = truncateUtf8(`MCP tool call: huge\n\nInput:\n${boundedText}`, 32 * 1024);
+  const unboundedSource = truncateUtf8(`MCP tool call: huge\n\nInput:\n${unboundedText}`, 32 * 1024);
+  assert.deepEqual(boundedPreview, unboundedPreview);
+  assert.deepEqual(boundedSource, unboundedSource);
 });

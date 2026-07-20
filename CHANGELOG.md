@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Default-on secret redaction and queued privacy pipeline
+
+- Added bounded sanitization and 13 high-confidence secret rules across tool
+  inputs, outputs, errors, and telemetry text. Secret matching is enabled by
+  default and can be disabled independently from binary sanitization.
+- Added async whole-event `redactEvent` hooks with mutate, drop, and fail-closed
+  semantics while preserving the legacy synchronous `redact` hook.
+- Moved privacy finalization and delivery into a bounded FIFO queue with batch
+  delivery, full-pipeline flushing, await mode, and serverless scheduling.
+- Added cross-SDK contract vectors and before/after lifecycle benchmarks.
+
 ### Local installation doctor
 
 - Added `npx @armature-tech/mcp-analytics doctor` for local, customer-run

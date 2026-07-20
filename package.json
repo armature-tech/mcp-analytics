@@ -63,6 +63,7 @@
     "dev:server": "tsx experimental/mock-env/mock-example-mcp-server.ts",
     "demo": "tsx experimental/mock-env/demo-client.ts",
     "demo:instrumented": "tsx experimental/mock-env/instrumented-demo-client.ts",
+    "benchmark:redaction": "tsx scripts/benchmark-redaction.ts",
     "test": "tsx --test tests/*.test.ts",
     "test:artifact-canary": "npm run build && node scripts/run-publish-canary.mjs",
     "test:platform-canary": "node scripts/run-publish-canary.mjs --require-platform",

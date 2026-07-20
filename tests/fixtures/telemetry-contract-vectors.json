@@ -242,5 +242,170 @@
         "z": null
       }
     }
+  ],
+  "secret_redaction": [
+    {
+      "name": "aws_key_in_prose",
+      "value_parts": ["temporary creds AKIA", "IOSFODNN7EXAMPLE for the deploy"],
+      "expect": "temporary creds [redacted:aws-access-key-id] for the deploy"
+    },
+    {
+      "name": "anthropic_key",
+      "value_parts": ["sk-ant-api03-", "abcdefghij1234567890"],
+      "expect": "[redacted:anthropic-api-key]"
+    },
+    {
+      "name": "openai_key",
+      "value_parts": ["sk-proj-", "AbCdEfGhIjKlMnOpQrStUv123456"],
+      "expect": "[redacted:openai-api-key]"
+    },
+    {
+      "name": "github_pat",
+      "value_parts": ["push failed for ghp_", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234"],
+      "expect": "push failed for [redacted:github-token]"
+    },
+    {
+      "name": "github_fine_grained_pat",
+      "value_parts": ["github_pat_", "11ABCDEFGHIJKLMNOPQRSTUV_abcdefghij"],
+      "expect": "[redacted:github-token]"
+    },
+    {
+      "name": "google_key",
+      "value_parts": ["key=AIza", "SyA1234567890abcdefghijklmnopqrstuv"],
+      "expect": "key=[redacted:google-api-key]"
+    },
+    {
+      "name": "slack_token",
+      "value_parts": ["xoxb-", "123456789012-abcdefABCDEF"],
+      "expect": "[redacted:slack-token]"
+    },
+    {
+      "name": "stripe_key",
+      "value_parts": ["sk_live_", "4eC39HqLyjWDarjtT1zdp7dc"],
+      "expect": "[redacted:stripe-key]"
+    },
+    {
+      "name": "jwt_standalone",
+      "value_parts": ["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.", "eyJzdWIiOiIxMjM0NTY3ODkwIn0.", "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"],
+      "expect": "[redacted:jwt]"
+    },
+    {
+      "name": "bearer_opaque_token",
+      "value_parts": ["Authorization: Bearer ", "abcdef1234567890abcdef"],
+      "expect": "Authorization: Bearer [redacted:bearer]"
+    },
+    {
+      "name": "bearer_jwt_gets_jwt_label",
+      "value_parts": ["Bearer eyJhbGciOiJIUzI1NiJ9.", "eyJmb28iOiJiYXIifQ.", "abcdefghij12345"],
+      "expect": "Bearer [redacted:jwt]"
+    },
+    {
+      "name": "basic_credentials",
+      "value_parts": ["Basic ", "dXNlcjpzM2NyZXRwQHNz"],
+      "expect": "Basic [redacted:basic]"
+    },
+    {
+      "name": "connection_string_masks_password_only",
+      "value_parts": ["postgres://admin:", "s3cr3t@db.example.com:5432/app"],
+      "expect": "postgres://admin:[redacted:connection-string]@db.example.com:5432/app"
+    },
+    {
+      "name": "pem_block",
+      "value_parts": ["-----BEGIN RSA PRIVATE KEY-----\n", "MIIEowIBAAKCAQEA7bq0\nMIIEowIBAAKCAQEA7bq1\n", "-----END RSA PRIVATE KEY-----"],
+      "expect": "[redacted:pem]"
+    },
+    {
+      "name": "sensitive_kv_in_string",
+      "value_parts": ["connect failed: password=", "hunter2 for admin"],
+      "expect": "connect failed: password=[redacted:sensitive-kv] for admin"
+    },
+    {
+      "name": "sensitive_field_names",
+      "value": {
+        "password": "hunter2",
+        "apiKey": "abc",
+        "client_secret": "xyz",
+        "Authorization": "Bearer short",
+        "token_count": 42,
+        "note": "safe"
+      },
+      "expect": {
+        "password": "[redacted:sensitive-field]",
+        "apiKey": "[redacted:sensitive-field]",
+        "client_secret": "[redacted:sensitive-field]",
+        "Authorization": "[redacted:sensitive-field]",
+        "token_count": 42,
+        "note": "safe"
+      }
+    },
+    {
+      "name": "field_name_case_and_separator_insensitive",
+      "value": {
+        "PASSWORD": "x",
+        "Api-Key": "y",
+        "refresh_token": "z"
+      },
+      "expect": {
+        "PASSWORD": "[redacted:sensitive-field]",
+        "Api-Key": "[redacted:sensitive-field]",
+        "refresh_token": "[redacted:sensitive-field]"
+      }
+    },
+    {
+      "name": "sensitive_key_wins_over_pattern_label",
+      "value": {
+        "config": {
+          "database_url": "postgres://u:pw@h/db",
+          "items": [
+            "AKIAIOSFODNN7EXAMPLE"
+          ]
+        }
+      },
+      "expect": {
+        "config": {
+          "database_url": "[redacted:sensitive-field]",
+          "items": [
+            "[redacted:aws-access-key-id]"
+          ]
+        }
+      }
+    },
+    {
+      "name": "non_matches_pass_through",
+      "value": {
+        "uuid": "6f9619ff-8b86-d011-b42d-00c04fc964ff",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "email": "user@example.com",
+        "short_sk": "sk-abc",
+        "prose_colon": "the secret: keep it safe"
+      },
+      "expect": {
+        "uuid": "6f9619ff-8b86-d011-b42d-00c04fc964ff",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "email": "user@example.com",
+        "short_sk": "sk-abc",
+        "prose_colon": "the secret: keep it safe"
+      }
+    },
+    {
+      "name": "base64_under_sensitive_key",
+      "value": {
+        "password": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "expect": {
+        "password": "[redacted:sensitive-field]"
+      }
+    },
+    {
+      "name": "array_recursion",
+      "value": [
+        "AKIAIOSFODNN7EXAMPLE",
+        "normal text"
+      ],
+      "expect": [
+        "[redacted:aws-access-key-id]",
+        "normal text"
+      ]
+    }
   ]
 }

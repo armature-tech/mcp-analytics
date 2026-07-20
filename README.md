@@ -223,7 +223,10 @@ type McpAnalyticsConfig = {
     emit?: (batch) => void | Promise<void>;
     onError?: (error, batch) => void;
     captureTelemetry?: boolean;
+    redactSecrets?: boolean;
     redact?: (value: unknown) => unknown;
+    redactEvent?: (event) => typeof event | null | Promise<typeof event | null>;
+    schedule?: (work: Promise<void>) => void;
     telemetryFieldMap?: { user_intent?: string; agent_thinking?: string; user_frustration?: string };
     requestCapability?: boolean;
   };
@@ -242,7 +245,10 @@ type McpAnalyticsConfig = {
 | **emit** | Network emitter | Replace delivery for tests or custom pipelines |
 | **onError** | None | Observe delivery failures |
 | **captureTelemetry** | **true** | Disable conversation-derived telemetry entirely (see below) |
+| **redactSecrets** | **true** | Disable only built-in high-confidence secret matching |
 | **redact** | None | Redact sensitive data from previews before delivery (see below) |
+| **redactEvent** | None | Mutate or drop the prepared whole tool-call event |
+| **schedule** | None | Register background work with a serverless lifecycle primitive |
 | **telemetryFieldMap** | None | Export existing argument fields as telemetry (see below) |
 | **requestCapability** | **false** | Inject `request_capability` so agents can report an unmet tool need |
 
@@ -300,12 +306,16 @@ If a tool's own input schema already declares a top-level `telemetry` property, 
 
 ### Redaction and binary payloads
 
-Before any preview is serialized, the SDK strips binary content automatically: image/audio content-block `data`, resource `blob`s, base64 data URIs, and long base64 strings are replaced with `"[binary removed]"` / `"[base64 removed]"` placeholders. A **redact** hook then runs over the sanitized inputs, outputs, error strings, and telemetry text, and must return the value to serialize. The pipeline is sanitize → redact → stringify → truncate. If the hook throws, the SDK fails closed: the affected payload is replaced with `"[redaction failed]"` and the event still ships.
+Before any preview is serialized, the SDK bounds sanitizer work to 65,536 units, removes binary/base64 payloads, and applies default-on high-confidence secret rules to inputs, outputs, errors, and telemetry text. Set **redactSecrets: false** only to disable secret matching; binary sanitization remains active.
+
+The legacy synchronous **redact** hook runs next. Prefer async-capable **redactEvent** for new integrations: it receives the whole prepared tool-call candidate and may mutate it or return `null` to drop the tool event. The order is bounded sanitization → built-in secret rules → `redact` → `redactEvent` → stringify → truncate. Hook failures fail closed with `"[redaction failed]"` placeholders.
 
 ### Delivery
 
-- **"background"** returns tool results immediately and posts events on the next turn of the event loop. Call **await recorder.flush()** during shutdown.
-- **"await"** waits for the delivery attempt before returning. Use it for serverless functions and short-lived processes.
+- **"background"** queues privacy work and returns immediately. It is intended for long-lived processes; call **await recorder.flush()** during shutdown.
+- **"await"** drains sanitization, hooks, and delivery before returning. Use it for serverless functions and short-lived processes.
+
+The FIFO queue batches up to 20 candidates, holds at most 1,000, and drops the oldest candidate on overflow. On platforms with `waitUntil`, pass **schedule: work => waitUntil(work)** to keep background delivery alive after the response.
 
 If the API key is missing, delivery quietly no-ops for local development.
 

@@ -71,19 +71,25 @@ for local dev — say so once, don't add guards.
 
 ## Step 4: Pick a delivery mode
 
-The default is `delivery: "background"` which schedules the post on `setImmediate`. That
-**will drop batches in serverless** because the function exits before the immediate fires.
+The default is `delivery: "background"`, which queues sanitization, redaction,
+and delivery off the response path. A serverless function may freeze before
+that work completes.
 
 Use this decision table:
 
 | Runtime | `delivery` |
 | --- | --- |
-| Vercel / Lambda / Cloudflare Workers / any per-request serverless | `"await"` |
+| Vercel / Lambda / Cloudflare Workers / any per-request serverless | `"await"`, or `"background"` with `schedule: work => waitUntil(work)` |
 | Long-lived Node process, container, fly machine, persistent server | `"background"` + call `recorder.flush()` on `SIGTERM` |
 
 Detect the runtime from the repo (look for `vercel.json`, `wrangler.toml`, `Dockerfile`,
 `fly.toml`, `package.json` scripts). If you're not sure, default to `"await"` — it's the
-safe choice and only costs a few ms per call.
+safe choice. `flush()` drains the entire privacy queue, not only active POSTs.
+
+Built-in high-confidence secret redaction is default-on. Prefer the async
+whole-event `redactEvent` hook for custom policy; it may mutate or drop a tool
+event. The legacy `redact` hook remains supported and runs first. Set
+`redactSecrets: false` only when explicitly replacing the built-ins.
 
 ## Step 5: Make the edits
 

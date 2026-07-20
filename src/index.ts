@@ -15,6 +15,8 @@ export type {
   McpServerInfo,
   RecordSessionInitEvent,
   RecordToolCallEvent,
+  RedactableToolCall,
+  RedactEventHook,
   RedactFunction,
   RegisteredToolHandler,
   RequestExtra,
@@ -49,7 +51,25 @@ export {
   prepareForPreview,
   REDACTION_FAILED_PLACEHOLDER,
   sanitizeValue,
+  SANITIZATION_BUDGET,
 } from "./sanitize.js";
+
+export {
+  normalizeSensitiveFieldName,
+  redactSecretsInString,
+  redactSecretsInValue,
+  SECRET_PATTERN_RULES,
+  SENSITIVE_FIELD_NAMES,
+  type SecretPatternRule,
+} from "./redact-secrets.js";
+
+export {
+  createPrivacyQueue,
+  PRIVACY_QUEUE_BATCH_SIZE,
+  PRIVACY_QUEUE_CAPACITY,
+  type PrivacyQueue,
+  type PrivacyQueueFinalizer,
+} from "./queue.js";
 
 export {
   buildActorId,
@@ -57,13 +77,16 @@ export {
   buildEventId,
   buildSessionInitEvent,
   buildToolCallEvent,
+  finalizeToolCallEvent,
   normalizeSessionId,
+  type BuildToolCallEventInput,
 } from "./events.js";
 
 export {
   defaultMcpAnalyticsConfig,
   emitTelemetryEvent,
   postTelemetryEvent,
+  reportEmitError,
 } from "./emit.js";
 
 export { createAnalyticsRecorder } from "./recorder.js";

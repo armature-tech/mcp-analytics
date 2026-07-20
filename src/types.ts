@@ -64,6 +64,22 @@ export type ActorIdentifierResolver = (
 // payload is replaced with "[redaction failed]", the event still ships).
 export type RedactFunction = (value: unknown) => unknown;
 
+export type RedactableToolCall = {
+  kind: "tool_call";
+  toolName: string;
+  status: "ok" | "error";
+  durationMs: number;
+  sessionId?: string;
+  input: unknown;
+  output?: unknown;
+  errorMessage?: string;
+  telemetry?: TelemetryArgs;
+};
+
+export type RedactEventHook = (
+  event: RedactableToolCall,
+) => RedactableToolCall | null | Promise<RedactableToolCall | null>;
+
 // Opt-in export of customer-owned argument fields as Armature telemetry
 // (gap #11). Keys are the V1 telemetry field names; values are top-level
 // argument property names to READ (never strip) from the tool's arguments.
@@ -94,7 +110,13 @@ export type McpAnalyticsConfig = {
     // nudges, and never exports telemetry values — including values sent by
     // clients holding a cached schema, which are stripped and dropped.
     captureTelemetry?: boolean;
+    /** Built-in high-confidence secret detection. Enabled by default. */
+    redactSecrets?: boolean;
+    /** @deprecated Prefer redactEvent for event context and async support. */
     redact?: RedactFunction;
+    redactEvent?: RedactEventHook;
+    /** Register background work with a platform lifecycle primitive (for example waitUntil). */
+    schedule?: (work: Promise<void>) => void;
     telemetryFieldMap?: TelemetryFieldMap;
     // Opt in to an SDK-owned request_capability tool that lets agents report
     // a capability absent from the server's current tool set. Default false.

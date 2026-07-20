@@ -99,7 +99,7 @@ export const postTelemetryEvent = async (
   }
 };
 
-const reportEmitError = (
+export const reportEmitError = (
   error: unknown,
   batch: AnalyticsIngestBatch,
   config: McpAnalyticsConfig,

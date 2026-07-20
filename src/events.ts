@@ -4,11 +4,14 @@ import {
   prepareForPreview,
   REDACTION_FAILED_PLACEHOLDER,
 } from "./sanitize.js";
+import { redactSecretsInString } from "./redact-secrets.js";
 import type {
   AnalyticsEventKind,
   AnalyticsIngestBatch,
   AnalyticsIngestEvent,
   McpClientInfo,
+  RedactableToolCall,
+  RedactEventHook,
   RedactFunction,
   RequestExtra,
   TelemetryArgs,
@@ -98,61 +101,57 @@ const buildToolCallSource = (toolName: string, input: unknown) => {
   return `MCP tool call: ${toolName}\n\nInput:\n${stringifyPreview(input)}`;
 };
 
-// Telemetry text is agent-authored but routinely quotes the user, so the
-// customer redaction hook sees it too. Whatever the hook returns is
-// re-normalized; a throwing hook drops the telemetry entirely (fail closed).
-const redactTelemetry = (
+const prepareTelemetry = (
   telemetry: TelemetryArgs | undefined,
   redact: RedactFunction | undefined,
+  redactSecrets: boolean,
 ): TelemetryArgs | undefined => {
-  if (telemetry === undefined || !redact) return telemetry;
+  const normalized = normalizeTelemetryArgs(telemetry);
+  if (!normalized) return undefined;
+  const protectedTelemetry: TelemetryArgs = {
+    ...normalized,
+    ...(typeof normalized.user_intent === "string"
+      ? {
+          user_intent: redactSecrets
+            ? redactSecretsInString(normalized.user_intent)
+            : normalized.user_intent,
+        }
+      : {}),
+    ...(typeof normalized.agent_thinking === "string"
+      ? {
+          agent_thinking: redactSecrets
+            ? redactSecretsInString(normalized.agent_thinking)
+            : normalized.agent_thinking,
+        }
+      : {}),
+  };
+  if (!redact) return protectedTelemetry;
   try {
-    return normalizeTelemetryArgs(redact(telemetry) as TelemetryArgs);
+    return normalizeTelemetryArgs(redact(protectedTelemetry) as TelemetryArgs);
   } catch {
     return undefined;
   }
 };
 
-const redactErrorMessage = (
+const prepareErrorMessage = (
   errorMessage: string | undefined,
   redact: RedactFunction | undefined,
+  redactSecrets: boolean,
 ): string | undefined => {
-  if (errorMessage === undefined || !redact) return errorMessage;
+  if (errorMessage === undefined) return undefined;
+  const protectedMessage = redactSecrets
+    ? redactSecretsInString(errorMessage)
+    : errorMessage;
+  if (!redact) return protectedMessage;
   try {
-    const redacted = redact(errorMessage);
+    const redacted = redact(protectedMessage);
     return typeof redacted === "string" ? redacted : stringifyPreview(redacted);
   } catch {
     return REDACTION_FAILED_PLACEHOLDER;
   }
 };
 
-// Marks an event as synthetic traffic from an Armature workflow run so
-// Session Analytics can exclude it. Spread first in the event literal —
-// absent when the call did not originate from a workflow run.
-const workflowStamp = (
-  workflowRunId: string | undefined,
-): Pick<AnalyticsIngestEvent, "is_workflow" | "workflow_run_id"> | Record<string, never> => {
-  if (!workflowRunId) return {};
-  return { is_workflow: true, workflow_run_id: workflowRunId };
-};
-
-export const buildToolCallEvent = ({
-  toolName,
-  telemetry,
-  input,
-  output,
-  status,
-  durationMs,
-  errorMessage,
-  actorId,
-  sessionId,
-  requestId,
-  startedAt,
-  finishedAt,
-  workflowRunId,
-  capabilityRequest,
-  redact,
-}: {
+export type BuildToolCallEventInput = {
   toolName: string;
   telemetry?: TelemetryArgs;
   input: unknown;
@@ -168,36 +167,76 @@ export const buildToolCallEvent = ({
   workflowRunId?: string;
   capabilityRequest?: boolean;
   redact?: RedactFunction;
-}): AnalyticsIngestEvent => {
-  // Contract pipeline (TELEMETRY-CONTRACT.md): sanitize → customer redact →
-  // stringify → truncate, for every payload that can carry customer data —
-  // input preview, the source built from the input, the result preview, the
-  // error string, and the telemetry text.
-  const safeInput = prepareForPreview(input, redact);
-  const safeOutput = output === undefined
-    ? undefined
-    : prepareForPreview(output, redact);
-  const safeErrorMessage = redactErrorMessage(errorMessage, redact);
-  const inputPreview = truncateUtf8(stringifyPreview(safeInput), MAX_PREVIEW_BYTES);
-  const source = truncateUtf8(buildToolCallSource(toolName, safeInput), MAX_SOURCE_BYTES);
-  const resultPreview = safeOutput === undefined
+  redactSecrets?: boolean;
+};
+
+const prepareToolCallCandidate = ({
+  toolName,
+  telemetry,
+  input,
+  output,
+  status,
+  durationMs,
+  errorMessage,
+  sessionId,
+  redact,
+  redactSecrets = true,
+}: BuildToolCallEventInput): RedactableToolCall => {
+  const preparedTelemetry = prepareTelemetry(telemetry, redact, redactSecrets);
+  return {
+    kind: "tool_call",
+    toolName,
+    status,
+    durationMs,
+    ...(sessionId ? { sessionId } : {}),
+    input: prepareForPreview(input, redact, { redactSecrets }),
+    ...(output === undefined
+      ? {}
+      : { output: prepareForPreview(output, redact, { redactSecrets }) }),
+    ...(errorMessage === undefined
+      ? {}
+      : { errorMessage: prepareErrorMessage(errorMessage, redact, redactSecrets) }),
+    ...(preparedTelemetry === undefined ? {} : { telemetry: preparedTelemetry }),
+  };
+};
+
+// Marks an event as synthetic traffic from an Armature workflow run so
+// Session Analytics can exclude it. Spread first in the event literal —
+// absent when the call did not originate from a workflow run.
+const workflowStamp = (
+  workflowRunId: string | undefined,
+): Pick<AnalyticsIngestEvent, "is_workflow" | "workflow_run_id"> | Record<string, never> => {
+  if (!workflowRunId) return {};
+  return { is_workflow: true, workflow_run_id: workflowRunId };
+};
+
+const assembleToolCallEvent = (
+  candidate: RedactableToolCall,
+  input: BuildToolCallEventInput,
+): AnalyticsIngestEvent => {
+  const inputPreview = truncateUtf8(stringifyPreview(candidate.input), MAX_PREVIEW_BYTES);
+  const source = truncateUtf8(
+    buildToolCallSource(candidate.toolName, candidate.input),
+    MAX_SOURCE_BYTES,
+  );
+  const resultPreview = candidate.output === undefined
     ? null
-    : truncateUtf8(stringifyPreview(safeOutput), MAX_PREVIEW_BYTES);
-  const t = redactTelemetry(normalizeTelemetryArgs(telemetry), redact);
+    : truncateUtf8(stringifyPreview(candidate.output), MAX_PREVIEW_BYTES);
+  const t = normalizeTelemetryArgs(candidate.telemetry);
 
   return {
-    ...workflowStamp(workflowRunId),
-    event_id: buildEventId({ actorId, requestId, kind: "tool_call" }),
+    ...workflowStamp(input.workflowRunId),
+    event_id: buildEventId({ actorId: input.actorId, requestId: input.requestId, kind: "tool_call" }),
     kind: "tool_call",
-    actor_id: actorId,
-    session_id_hint: sessionId ?? null,
-    started_at: startedAt,
-    finished_at: finishedAt,
-    duration_ms: durationMs,
-    ok: status === "ok",
-    error: safeErrorMessage ?? null,
+    actor_id: input.actorId,
+    session_id_hint: candidate.sessionId ?? null,
+    started_at: input.startedAt,
+    finished_at: input.finishedAt,
+    duration_ms: candidate.durationMs,
+    ok: candidate.status === "ok",
+    error: candidate.errorMessage ?? null,
     metadata: {
-      tool_name: toolName,
+      tool_name: candidate.toolName,
       user_intent: t?.user_intent ?? null,
       agent_thinking: t?.agent_thinking ?? null,
       user_frustration: t?.user_frustration ?? null,
@@ -207,7 +246,7 @@ export const buildToolCallEvent = ({
       context: t?.agent_thinking ?? null,
       frustration_level: t?.user_frustration ?? null,
       input_preview: inputPreview.value,
-      ...(capabilityRequest ? { capability_request: true } : {}),
+      ...(input.capabilityRequest ? { capability_request: true } : {}),
     },
     script_source: source.value,
     script_source_truncated: source.truncated,
@@ -217,6 +256,34 @@ export const buildToolCallEvent = ({
     logs: [],
     search_calls: [],
   };
+};
+
+export const buildToolCallEvent = (
+  input: BuildToolCallEventInput,
+): AnalyticsIngestEvent => {
+  return assembleToolCallEvent(prepareToolCallCandidate(input), input);
+};
+
+export const finalizeToolCallEvent = async (
+  input: BuildToolCallEventInput & { redactEvent?: RedactEventHook },
+): Promise<AnalyticsIngestEvent | null> => {
+  let candidate = prepareToolCallCandidate(input);
+  if (input.redactEvent) {
+    try {
+      const redacted = await input.redactEvent(candidate);
+      if (redacted === null) return null;
+      candidate = redacted;
+    } catch {
+      candidate = {
+        ...candidate,
+        input: REDACTION_FAILED_PLACEHOLDER,
+        output: REDACTION_FAILED_PLACEHOLDER,
+        errorMessage: REDACTION_FAILED_PLACEHOLDER,
+        telemetry: undefined,
+      };
+    }
+  }
+  return assembleToolCallEvent(candidate, input);
 };
 
 export const buildSessionInitEvent = ({

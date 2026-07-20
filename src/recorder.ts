@@ -20,13 +20,12 @@ import {
   buildActorIdentityEvent,
   buildBatch,
   buildSessionInitBatch,
-  buildToolCallEvent,
+  finalizeToolCallEvent,
   normalizeRequestId,
   normalizeSessionId,
   normalizeStartedAt,
 } from "./events.js";
 import {
-  createFlushableEmitter,
   defaultMcpAnalyticsConfig,
   resolveActorSeed,
   resolveActorIdentifier,
@@ -55,6 +54,7 @@ import {
   REQUEST_CAPABILITY_TOOL_NAME,
   REQUEST_CAPABILITY_ZOD_SHAPE,
 } from "./request-capability.js";
+import { createPrivacyQueue } from "./queue.js";
 
 const nudgeTelemetryDescriptions = (schema: unknown): unknown => {
   if (!isJsonObjectSchema(schema)) return schema;
@@ -92,7 +92,8 @@ const createAnalyticsContext = async (
 export const createAnalyticsRecorder = (
   config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
 ): AnalyticsRecorder => {
-  const { emitBatch, flush } = createFlushableEmitter(config);
+  const privacyQueue = createPrivacyQueue(config);
+  const flush = privacyQueue.flush;
   // Tracks which (actorId, sessionId) pairs have already emitted a session_init,
   // so we emit it at most once per session. Bounded with FIFO eviction: MCP
   // gives no reliable session-closed signal, so an unbounded set would leak on
@@ -196,34 +197,34 @@ export const createAnalyticsRecorder = (
   const recordSessionInit = async (event: RecordSessionInitEvent) => {
     const sessionId = resolveSessionId(event);
     if (!sessionId) return;
-
-    const context = await analyticsContextFor({
-      ctx: event.ctx,
-      extra: event.extra,
-      headers: event.headers ?? event.extra?.requestInfo?.headers,
-      authInfo: event.authInfo ?? event.extra?.authInfo,
-    });
-
     const finishedAtMs = Date.now();
     const startedAt = normalizeStartedAt({
       startedAt: event.startedAt,
       finishedAtMs,
     });
-    const batch = buildSessionInitBatch({
-      actorId: context.actorId,
-      sessionId,
-      startedAt,
-      extra: event.extra,
-      sessionInitKeys,
-      clientInfo:
-        event.clientInfo
-        ?? getClientInfoForSessionId(sessionId)
-        ?? parseStatelessSessionClientInfo(sessionId),
-      workflowRunId: resolveWorkflowRunId(event),
-      identityEvent: identityEventFor(context, startedAt),
+    const workflowRunId = resolveWorkflowRunId(event);
+    return privacyQueue.enqueue(async () => {
+      const context = await analyticsContextFor({
+        ctx: event.ctx,
+        extra: event.extra,
+        headers: event.headers ?? event.extra?.requestInfo?.headers,
+        authInfo: event.authInfo ?? event.extra?.authInfo,
+      });
+      const batch = buildSessionInitBatch({
+        actorId: context.actorId,
+        sessionId,
+        startedAt,
+        extra: event.extra,
+        sessionInitKeys,
+        clientInfo:
+          event.clientInfo
+          ?? getClientInfoForSessionId(sessionId)
+          ?? parseStatelessSessionClientInfo(sessionId),
+        workflowRunId,
+        identityEvent: identityEventFor(context, startedAt),
+      });
+      return batch?.events ?? null;
     });
-
-    if (batch) await emitBatch(batch);
   };
 
   const recordToolCall = async (event: RecordToolCallEvent) => {
@@ -244,15 +245,6 @@ export const createAnalyticsRecorder = (
         )
       : undefined;
 
-    const context = await analyticsContextFor({
-      ctx: event.ctx,
-      extra: event.extra,
-      headers: event.headers ?? event.extra?.requestInfo?.headers,
-      authInfo: event.authInfo ?? event.extra?.authInfo,
-      toolName: event.name,
-      telemetry,
-    });
-
     const finishedAtMs = Date.now();
     const finishedAt = new Date(finishedAtMs).toISOString();
     const durationMs = event.durationMs ?? 0;
@@ -270,47 +262,72 @@ export const createAnalyticsRecorder = (
         : String(event.error);
 
     const workflowRunId = resolveWorkflowRunId(event);
-    const toolCallEvent = buildToolCallEvent({
-      toolName: event.name,
-      telemetry,
-      input: event.args,
-      output: event.result,
-      status: event.status,
-      durationMs,
-      errorMessage,
-      actorId: context.actorId,
-      sessionId,
-      requestId,
-      startedAt,
-      finishedAt,
-      workflowRunId,
-      capabilityRequest: event.capabilityRequest,
-      redact: config.armature?.redact,
-    });
-
-    // An explicit clientInfo on the event always wins; otherwise look up
-    // whatever the initialize-handshake patch captured for this sessionId; as a
-    // last resort, identity-bearing session ids (stateless HTTP) are parseable.
-    const effectiveClientInfo =
-      event.clientInfo
-      ?? getClientInfoForSessionId(sessionId)
-      ?? parseStatelessSessionClientInfo(sessionId);
-
-    await emitBatch(
-      buildBatch({
-        event: toolCallEvent,
-        extra: {
-          ...(event.extra ?? {}),
-          ...(sessionId ? { sessionId } : {}),
-        },
+    return privacyQueue.enqueue(async () => {
+      const context = await analyticsContextFor({
+        ctx: event.ctx,
+        extra: event.extra,
+        headers: event.headers ?? event.extra?.requestInfo?.headers,
+        authInfo: event.authInfo ?? event.extra?.authInfo,
+        toolName: event.name,
+        telemetry,
+      });
+      const toolCallEvent = await finalizeToolCallEvent({
+        toolName: event.name,
+        telemetry,
+        input: event.args,
+        output: event.result,
+        status: event.status,
+        durationMs,
+        errorMessage,
         actorId: context.actorId,
+        sessionId,
+        requestId,
         startedAt,
-        sessionInitKeys,
-        clientInfo: effectiveClientInfo,
+        finishedAt,
         workflowRunId,
-        identityEvent: identityEventFor(context, startedAt),
-      }),
-    );
+        capabilityRequest: event.capabilityRequest,
+        redact: config.armature?.redact,
+        redactSecrets: config.armature?.redactSecrets,
+        redactEvent: config.armature?.redactEvent,
+      });
+
+      const effectiveClientInfo =
+        event.clientInfo
+        ?? getClientInfoForSessionId(sessionId)
+        ?? parseStatelessSessionClientInfo(sessionId);
+      const identityEvent = identityEventFor(context, startedAt);
+      const extra = {
+        ...(event.extra ?? {}),
+        ...(sessionId ? { sessionId } : {}),
+      };
+
+      if (toolCallEvent) {
+        return buildBatch({
+          event: toolCallEvent,
+          extra,
+          actorId: context.actorId,
+          startedAt,
+          sessionInitKeys,
+          clientInfo: effectiveClientInfo,
+          workflowRunId,
+          identityEvent,
+        }).events;
+      }
+
+      if (sessionId) {
+        return buildSessionInitBatch({
+          actorId: context.actorId,
+          sessionId,
+          startedAt,
+          extra,
+          sessionInitKeys,
+          clientInfo: effectiveClientInfo,
+          workflowRunId,
+          identityEvent,
+        })?.events ?? null;
+      }
+      return identityEvent ? [identityEvent] : null;
+    });
   };
 
   const registeredTools = new Map<
