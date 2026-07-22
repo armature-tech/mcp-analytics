@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Registry-style tools keep their output schemas and annotations
+
+`ToolRegistration` now accepts `outputSchema` and `annotations`, and the
+recorder forwards both to `McpServer.registerTool` and includes them in
+`toolDefinitions()`. Previously the registry shape silently dropped a
+customer's output schema from `tools/list` (while still passing
+`structuredContent` through), so schema-driven clients lost result typing
+and the server advertised structured results without a declared schema.
+The telemetry extension continues to touch only the input schema.
+
 ### Doctor no longer fails healthy servers that serve request_capability
 
 The tool-wrapping check counted the SDK-owned `request_capability` tool —

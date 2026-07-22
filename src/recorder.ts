@@ -455,6 +455,12 @@ export const createAnalyticsRecorder = (
         ...(registration.title !== undefined ? { title: registration.title } : {}),
         ...(description !== undefined ? { description } : {}),
         ...(registeredHasInputSchema ? { inputSchema: plan.inputSchema } : {}),
+        ...(registration.outputSchema !== undefined
+          ? { outputSchema: registration.outputSchema }
+          : {}),
+        ...(registration.annotations !== undefined
+          ? { annotations: registration.annotations }
+          : {}),
       } as Parameters<typeof server.registerTool>[1],
       (async (...callbackArgs: unknown[]) => {
         const argsOrExtra = callbackArgs[0];
@@ -549,6 +555,12 @@ export const createAnalyticsRecorder = (
       }
       if (registration.inputSchema !== undefined) {
         definition.inputSchema = registration.inputSchema;
+      }
+      if (registration.outputSchema !== undefined) {
+        definition.outputSchema = registration.outputSchema;
+      }
+      if (registration.annotations !== undefined) {
+        definition.annotations = registration.annotations;
       }
       definitions.push(...decorateDefinitions([definition]));
     }

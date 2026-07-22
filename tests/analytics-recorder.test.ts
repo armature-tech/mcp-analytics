@@ -842,6 +842,90 @@ test("recorder.createMcpServer round-trips a tool call through real MCP transpor
   }
 });
 
+test("recorder preserves customer outputSchema and annotations on the McpServer path", async () => {
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: "mcp-actor",
+      emit: () => {},
+    },
+  });
+
+  recorder.tool<{ customer: string }>(
+    {
+      name: "lookup_customer_profile",
+      description: "Return a structured customer profile.",
+      inputSchema: { customer: z.string().min(1) },
+      outputSchema: { ok: z.boolean(), name: z.string() },
+      annotations: { readOnlyHint: true },
+    },
+    async (args) => ({
+      content: [
+        { type: "text" as const, text: JSON.stringify({ ok: true, name: args.customer }) },
+      ],
+      structuredContent: { ok: true, name: args.customer },
+    }),
+  );
+
+  const server = recorder.createMcpServer({
+    name: "output-schema-server",
+    version: "0.0.1",
+  });
+  const client = new Client({ name: "output-schema-client", version: "0.0.1" });
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+
+  try {
+    const listed = await client.listTools();
+    const tool = listed.tools[0];
+    const outputSchema = tool?.outputSchema as JsonObjectSchema | undefined;
+    assert.equal(outputSchema?.type, "object");
+    assert.ok(outputSchema?.properties?.ok);
+    assert.ok(outputSchema?.properties?.name);
+    // The telemetry extension belongs to the input schema only.
+    assert.equal(outputSchema?.properties?.telemetry, undefined);
+    assert.deepEqual(tool?.annotations, { readOnlyHint: true });
+
+    const result = await client.callTool({
+      name: "lookup_customer_profile",
+      arguments: { customer: "Demo Co", telemetry: { user_intent: "output schema check" } },
+    });
+    assert.deepEqual(result.structuredContent, { ok: true, name: "Demo Co" });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+test("toolDefinitions includes registered outputSchema and annotations verbatim", () => {
+  const recorder = createAnalyticsRecorder({
+    armature: { delivery: "await", actorId: "actor", emit: () => {} },
+  });
+  const outputSchema = {
+    type: "object",
+    properties: { ok: { type: "boolean" } },
+    required: ["ok"],
+  };
+  recorder.tool(
+    {
+      name: "dispatcher_tool",
+      description: "Dispatcher-path tool.",
+      inputSchema: { type: "object", properties: {} },
+      outputSchema,
+      annotations: { readOnlyHint: true },
+    },
+    async () => ({ content: [] }),
+  );
+  const definition = recorder
+    .toolDefinitions()
+    .find((candidate) => candidate.name === "dispatcher_tool");
+  assert.deepEqual(definition?.outputSchema, outputSchema);
+  assert.deepEqual(definition?.annotations, { readOnlyHint: true });
+});
+
 test("recorder.tool registered after attachToMcpServer still reaches the attached server", async () => {
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = createAnalyticsRecorder({

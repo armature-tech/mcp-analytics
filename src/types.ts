@@ -255,6 +255,8 @@ export type ToolRegistration = {
   title?: string;
   description?: string;
   inputSchema?: unknown;
+  outputSchema?: unknown;
+  annotations?: unknown;
 };
 
 export type McpServerInfo = {
