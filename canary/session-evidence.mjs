@@ -59,7 +59,10 @@ export function selectExpectedHarnessEvidence({ dispatch, evidence }) {
       item.workflowRunId === run.runId && harnessFamily(item.session) === run.harness
     ));
     if (candidates.length !== 1) {
-      throw new Error(`${run.runId}: expected exactly one ${run.harness} session, got ${candidates.length}`);
+      const cappedHint = candidates.length === 0
+        ? " (if ingest succeeded, zero visible sessions usually means the canary organization is subject to a free-tier session-visibility cap; keep the canary org on a non-free plan)"
+        : "";
+      throw new Error(`${run.runId}: expected exactly one ${run.harness} session, got ${candidates.length}${cappedHint}`);
     }
     return candidates[0];
   });

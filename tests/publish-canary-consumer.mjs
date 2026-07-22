@@ -146,7 +146,10 @@ async function readback(shape, intent) {
     if (matches.length === 2) break;
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
-  assert.equal(matches.length, 2, `${shape}: expected two platform sessions, got ${matches.length}`);
+  const cappedHint = matches.length === 0
+    ? " (ingest succeeded, so zero visible sessions usually means the canary organization is subject to a free-tier session-visibility cap; keep the canary org on a non-free plan)"
+    : "";
+  assert.equal(matches.length, 2, `${shape}: expected two platform sessions, got ${matches.length}${cappedHint}`);
   assert.equal(new Set(matches.map(session => session.session_key)).size, 2);
   assert.equal(new Set(matches.map(session => session.actor_id)).size, 1);
   for (const session of matches) {
