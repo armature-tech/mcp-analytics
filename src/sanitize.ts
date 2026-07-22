@@ -10,6 +10,9 @@ export const SANITIZATION_BUDGET = 65_536;
 const DATA_URI_MIN_CHARS = 64;
 const BASE64_MIN_CHARS = 512;
 const BASE64_RE = /^[A-Za-z0-9+/_-]+={0,2}$/;
+// Base64-alphabet runs long enough to be payloads embedded inside a larger
+// string, e.g. a blob echoed within a JSON-serialized tool result.
+const EMBEDDED_BASE64_RE = /[A-Za-z0-9+/_-]{512,}={0,2}/g;
 
 const isBase64Payload = (value: string): boolean => {
   if (value.length >= DATA_URI_MIN_CHARS && value.startsWith("data:") && value.includes(";base64,")) {
@@ -19,7 +22,11 @@ const isBase64Payload = (value: string): boolean => {
 };
 
 const sanitizeString = (value: string): string => {
-  return isBase64Payload(value) ? BASE64_REMOVED_PLACEHOLDER : value;
+  if (isBase64Payload(value)) return BASE64_REMOVED_PLACEHOLDER;
+  if (value.length >= BASE64_MIN_CHARS) {
+    return value.replace(EMBEDDED_BASE64_RE, BASE64_REMOVED_PLACEHOLDER);
+  }
+  return value;
 };
 
 type Budget = { remaining: number };
@@ -39,7 +46,11 @@ const sanitizeValueBounded = (
   budget: Budget,
 ): unknown => {
   if (typeof value === "string") {
-    const sanitized = sanitizeString(value);
+    // Bound pattern work to the retainable window first: previews are
+    // truncated anyway, so scanning beyond the budget is pure waste on
+    // large payloads.
+    const bounded = value.length > budget.remaining ? value.slice(0, budget.remaining) : value;
+    const sanitized = sanitizeString(bounded);
     if (sanitized.length <= budget.remaining) {
       budget.remaining -= sanitized.length;
       return sanitized;
