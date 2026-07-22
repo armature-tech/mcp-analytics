@@ -16,6 +16,10 @@ import {
   type DoctorTool,
 } from "../src/doctor.js";
 import { parseDoctorArguments } from "../src/doctor-args.js";
+import {
+  REQUEST_CAPABILITY_DESCRIPTION,
+  REQUEST_CAPABILITY_TOOL_NAME,
+} from "../src/request-capability.js";
 
 const currentTool = (name: string): DoctorTool => ({
   name,
@@ -63,8 +67,41 @@ test("classifies current, legacy, owned, and missing tool instrumentation", () =
     legacy: ["legacy"],
     owned: ["owned"],
     missing: ["plain"],
+    sdkOwned: [],
     total: 4,
   });
+});
+
+test("exempts the SDK-owned request_capability tool from wrapping coverage", () => {
+  const sdkCapabilityTool: DoctorTool = {
+    name: REQUEST_CAPABILITY_TOOL_NAME,
+    description: REQUEST_CAPABILITY_DESCRIPTION,
+    inputSchema: {
+      type: "object",
+      properties: { capability: { type: "string" } },
+      required: ["capability"],
+    },
+  };
+  const coverage = inspectToolCoverage([currentTool("a"), sdkCapabilityTool]);
+  assert.deepEqual(coverage, {
+    current: ["a"],
+    legacy: [],
+    owned: [],
+    missing: [],
+    sdkOwned: [REQUEST_CAPABILITY_TOOL_NAME],
+    total: 1,
+  });
+
+  // A customer tool that merely shadows the reserved name (different
+  // description) is still held to the wrapping contract.
+  const shadow: DoctorTool = {
+    name: REQUEST_CAPABILITY_TOOL_NAME,
+    description: "Customer-defined capability requester.",
+    inputSchema: { type: "object", properties: {} },
+  };
+  const shadowCoverage = inspectToolCoverage([currentTool("a"), shadow]);
+  assert.deepEqual(shadowCoverage.missing, [REQUEST_CAPABILITY_TOOL_NAME]);
+  assert.equal(shadowCoverage.total, 2);
 });
 
 test("parses HTTP and stdio targets without accepting an inline ingest key", () => {
@@ -188,6 +225,35 @@ test("doctor reports healthy only when MCP wrapping and ingest both pass", async
   assert.equal(broken.checks.find((check) => check.id === "tool-wrapping")?.status, "fail");
   assert.equal(broken.checks.find((check) => check.id === "ingest-auth")?.status, "fail");
   assert.ok(!JSON.stringify(broken).includes("ami_test_secret"));
+});
+
+test("doctor stays healthy when the SDK-owned request_capability tool is served", async () => {
+  const options = {
+    ...defaultDoctorOptions({ kind: "http" as const, url: "http://localhost:3000/mcp", headers: {} }),
+    skipIngest: true,
+  };
+  const report = await runDoctor(options, {
+    detectLocalSdks: async () => [{ language: "typescript", declaration: "@armature-tech/mcp-analytics fixture" }],
+    inspectMcp: async () => ({
+      tools: [
+        currentTool("customer_tool"),
+        {
+          name: REQUEST_CAPABILITY_TOOL_NAME,
+          description: REQUEST_CAPABILITY_DESCRIPTION,
+          inputSchema: {
+            type: "object",
+            properties: { capability: { type: "string" } },
+            required: ["capability"],
+          },
+        },
+      ],
+    }),
+    verifyIngest: async () => undefined,
+  });
+  assert.equal(report.healthy, true);
+  const wrapping = report.checks.find((check) => check.id === "tool-wrapping");
+  assert.equal(wrapping?.status, "pass");
+  assert.match(wrapping?.detail || "", /request_capability tool carries no telemetry block by design/);
 });
 
 test("doctor warns without failing when a tool owns the telemetry field", async () => {

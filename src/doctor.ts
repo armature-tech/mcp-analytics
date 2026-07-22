@@ -3,6 +3,10 @@ import { resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  REQUEST_CAPABILITY_DESCRIPTION,
+  REQUEST_CAPABILITY_TOOL_NAME,
+} from "./request-capability.js";
 
 const DEFAULT_INGEST_URL = "https://app.armature.tech/api/mcp-analytics/ingest";
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -189,19 +193,33 @@ export const classifyToolInstrumentation = (
   return ownsTelemetryField ? "owned" : "missing";
 };
 
+// The SDK's own request_capability tool is registered without a telemetry
+// block on purpose (its input is already conversation-derived), so the
+// wrapping check must not count it as an unwrapped customer tool. Match on
+// the exact advertised description as well as the reserved name so a
+// customer-defined tool that merely shadows the name is still checked.
+export const isSdkOwnedCapabilityTool = (tool: DoctorTool): boolean =>
+  tool.name === REQUEST_CAPABILITY_TOOL_NAME
+  && (tool.description || "") === REQUEST_CAPABILITY_DESCRIPTION;
+
 export const inspectToolCoverage = (tools: DoctorTool[]) => {
   const current: string[] = [];
   const legacy: string[] = [];
   const owned: string[] = [];
   const missing: string[] = [];
+  const sdkOwned: string[] = [];
   for (const tool of tools) {
+    if (isSdkOwnedCapabilityTool(tool)) {
+      sdkOwned.push(tool.name);
+      continue;
+    }
     const classification = classifyToolInstrumentation(tool);
     if (classification === "current") current.push(tool.name);
     else if (classification === "legacy") legacy.push(tool.name);
     else if (classification === "owned") owned.push(tool.name);
     else missing.push(tool.name);
   }
-  return { current, legacy, owned, missing, total: tools.length };
+  return { current, legacy, owned, missing, sdkOwned, total: tools.length - sdkOwned.length };
 };
 
 const readIfPresent = async (path: string): Promise<string | null> => {
@@ -386,7 +404,10 @@ export const runDoctor = async (
         checks.push(pass(
           "tool-wrapping",
           "Tool wrapping",
-          `All ${coverage.total} tools expose the current Armature telemetry contract.`,
+          `All ${coverage.total} tools expose the current Armature telemetry contract.`
+            + (coverage.sdkOwned.length > 0
+              ? ` The SDK-owned ${coverage.sdkOwned.join(", ")} tool carries no telemetry block by design and is exempt.`
+              : ""),
         ));
       }
     }

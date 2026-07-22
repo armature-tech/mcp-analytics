@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Doctor no longer fails healthy servers that serve request_capability
+
+The tool-wrapping check counted the SDK-owned `request_capability` tool —
+which intentionally carries no telemetry block — as an unwrapped customer
+tool, so a correct install with `requestCapability: true` exited 1 with
+"needs attention". The coverage inspection now exempts the tool when both its
+reserved name and exact advertised description match; a customer tool that
+merely shadows the name is still held to the wrapping contract.
+
 ### Default-on secret redaction and queued privacy pipeline
 
 - Added bounded sanitization and 13 high-confidence secret rules across tool
