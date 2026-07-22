@@ -313,6 +313,51 @@ wrapMastraTools(tools, {
 });
 ```
 
+**Stateless / serverless HTTP (Vercel, Lambda):** do NOT serve with
+`startHTTP({ options: { serverless: true } })`. Mastra's serverless mode
+hard-codes `sessionIdGenerator: undefined` on the transient transport (your
+generator is ignored), so no `Mcp-Session-Id` is ever issued at `initialize`,
+clients have nothing to echo, and every tool call ships with no session hint —
+ingest falls back to per-actor-per-day bucketing and concurrent conversations
+merge into one dashboard session with client "unknown".
+
+Use the hybrid instead: resolve the session from the request body first, then
+let `initialize` (the only request where the resolved `sessionIdGenerator` is
+defined) take Mastra's stateful branch and issue the identity-bearing id. Every
+other request carries `sessionIdGenerator: undefined`, which Mastra treats as
+stateless — fresh transient transport, no in-memory session lookup, so warm and
+cold instances behave identically:
+
+```ts
+import { resolveStatelessHttpSession } from "@armature-tech/mcp-analytics";
+
+const body = req.method === "POST" ? await readJsonBody(req) : undefined;
+// Mastra's own readJsonBody reuses a pre-parsed body — set it so the stream
+// isn't consumed twice.
+(req as IncomingMessage & { body?: unknown }).body = body;
+const session = resolveStatelessHttpSession({ body, headers: req.headers });
+await mcpServer.startHTTP({
+  url: new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`),
+  httpPath: "/mcp",
+  req,
+  res,
+  options: {
+    sessionIdGenerator: session.sessionIdGenerator, // defined only at initialize
+    enableJsonResponse: true,
+  },
+});
+await analytics.flush(); // with createMastraAnalytics; or rely on delivery: "await"
+```
+
+The client echoes the issued `Mcp-Session-Id` (`mcp_<name>_v_<version>_<uuid>`)
+on every subsequent request; the adapter forwards `requestInfo.headers` from
+`context.mcp.extra`, and the recorder recovers the session from that header —
+stable sessions and client attribution with no session store. Verify the wiring
+with one curl: POST an `initialize` and check the response carries an
+`mcp-session-id` header shaped `mcp_<client>_v_<version>_<uuid>`. If it's
+missing, the request took the serverless path — make sure the `options` object
+passes the resolved `sessionIdGenerator` field itself, not a wrapper function.
+
 The SDK also recognises `authInfo.apiKey` and `authInfo.principalId` as actor-seed
 aliases (alongside `authInfo.token` and `authInfo.clientId`), so Mastra setups that
 expose auth under those names don't need a custom `actorId` resolver.
