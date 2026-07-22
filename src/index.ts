@@ -83,8 +83,11 @@ export {
 } from "./events.js";
 
 export {
+  DEFAULT_INGEST_MAX_ATTEMPTS,
+  DEFAULT_INGEST_RETRY_DELAY_MS,
   defaultMcpAnalyticsConfig,
   emitTelemetryEvent,
+  IngestDeliveryError,
   postTelemetryEvent,
   reportEmitError,
 } from "./emit.js";

@@ -9,9 +9,55 @@ export const defaultMcpAnalyticsConfig = {
   armature: {
     endpointUrl: "https://app.armature.tech/api/mcp-analytics/ingest",
     enabled: true,
-    timeoutMs: 500,
+    timeoutMs: 5_000,
   },
 } satisfies McpAnalyticsConfig;
+
+export const DEFAULT_INGEST_MAX_ATTEMPTS = 2;
+export const DEFAULT_INGEST_RETRY_DELAY_MS = 100;
+
+export class IngestDeliveryError extends Error {
+  readonly code: string;
+  readonly status?: number;
+  readonly retryable: boolean;
+  readonly attempts: number;
+
+  constructor(message: string, options: {
+    code: string;
+    status?: number;
+    retryable?: boolean;
+    attempts: number;
+    cause?: unknown;
+  }) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "IngestDeliveryError";
+    this.code = options.code;
+    this.status = options.status;
+    this.retryable = options.retryable === true;
+    this.attempts = options.attempts;
+  }
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const responseErrorCode = async (response: Response): Promise<string> => {
+  const fallback = `ingest_http_${response.status}`;
+  const text = (await response.text()).slice(0, 4_096);
+  try {
+    const payload = JSON.parse(text) as {
+      error?: { code?: unknown };
+      errorCode?: unknown;
+    };
+    const candidate = typeof payload.error?.code === "string"
+      ? payload.error.code
+      : typeof payload.errorCode === "string"
+        ? payload.errorCode
+        : fallback;
+    return /^[a-z0-9][a-z0-9_:-]{0,99}$/i.test(candidate) ? candidate : fallback;
+  } catch {
+    return fallback;
+  }
+};
 
 export const resolveEndpointUrl = (config: McpAnalyticsConfig) => {
   return config.armature?.endpointUrl ??
@@ -72,31 +118,63 @@ export const postTelemetryEvent = async (
   }
 
   const body = JSON.stringify(batch);
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    config.armature?.timeoutMs ?? defaultMcpAnalyticsConfig.armature.timeoutMs,
-  );
+  const timeoutMs = config.armature?.timeoutMs ?? defaultMcpAnalyticsConfig.armature.timeoutMs;
 
-  try {
-    const response = await fetch(endpointUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body,
-      signal: controller.signal,
-    });
+  for (let attempt = 1; attempt <= DEFAULT_INGEST_MAX_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(endpointUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body,
+        signal: controller.signal,
+      });
 
-    if (!response.ok) {
-      throw new Error(`Armature ingest failed with ${response.status}: ${await response.text()}`);
+      if (response.ok) {
+        return { skipped: false, ok: true, status: response.status, attempts: attempt };
+      }
+
+      const retryable = response.status === 429 || response.status >= 500;
+      const code = await responseErrorCode(response);
+      if (retryable && attempt < DEFAULT_INGEST_MAX_ATTEMPTS) {
+        await sleep(DEFAULT_INGEST_RETRY_DELAY_MS);
+        continue;
+      }
+      throw new IngestDeliveryError(
+        `Armature ingest failed with HTTP ${response.status} (${code})`,
+        { code, status: response.status, retryable, attempts: attempt },
+      );
+    } catch (error) {
+      if (error instanceof IngestDeliveryError) throw error;
+      const timedOut = (error as { name?: string } | null)?.name === "AbortError";
+      if (attempt < DEFAULT_INGEST_MAX_ATTEMPTS) {
+        await sleep(DEFAULT_INGEST_RETRY_DELAY_MS);
+        continue;
+      }
+      throw new IngestDeliveryError(
+        timedOut
+          ? `Armature ingest timed out after ${timeoutMs}ms`
+          : "Armature ingest connection failed",
+        {
+          code: timedOut ? "ingest_timeout" : "ingest_connection_failed",
+          retryable: true,
+          attempts: attempt,
+          cause: error,
+        },
+      );
+    } finally {
+      clearTimeout(timeout);
     }
-
-    return { skipped: false, ok: true, status: response.status };
-  } finally {
-    clearTimeout(timeout);
   }
+
+  throw new IngestDeliveryError("Armature ingest delivery failed", {
+    code: "ingest_delivery_failed",
+    attempts: DEFAULT_INGEST_MAX_ATTEMPTS,
+  });
 };
 
 export const reportEmitError = (

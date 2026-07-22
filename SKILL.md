@@ -60,7 +60,7 @@ The SDK needs one credential, plus an optional URL override:
 | Variable | What it is |
 | --- | --- |
 | `ANALYTICS_INGEST_API_KEY` | Your Armature API key (created in the dashboard). Identifies the MCP server and signs each batch. |
-| `ANALYTICS_INGEST_URL` | Optional. Defaults to the prod endpoint `https://app.armature.tech/api/mcp-analytics/ingest` (SDK ≥ 0.4.2). Override for a local mock or staging environment. On 0.4.1 and earlier the default was `http://127.0.0.1:8787/...` — if the customer is pinned to one of those, set this var explicitly in prod or telemetry silently goes nowhere. |
+| `ANALYTICS_INGEST_URL` | Optional. US defaults to `https://app.armature.tech/api/mcp-analytics/ingest`; set `https://eu.armature.tech/api/mcp-analytics/ingest` for EU. Override for a local mock or staging environment. |
 
 Add `ANALYTICS_INGEST_API_KEY` to whatever env mechanism the project uses (`.env.example`,
 `wrangler.toml`, `vercel.json`, fly secrets, k8s manifests). Do **not** commit real values;
@@ -68,6 +68,11 @@ put a placeholder in `.env.example` and tell the user where to paste the real on
 
 If `ANALYTICS_INGEST_API_KEY` is missing at runtime, the SDK silently no-ops. That's intentional
 for local dev — say so once, don't add guards.
+
+The network emitter uses a 5-second timeout per attempt and at most two
+attempts, separated by 100 ms. It retries only network failures, timeouts,
+`429`, and `5xx`; other `4xx` responses are returned once as a structured
+`IngestDeliveryError` through `onError` without breaking the host application.
 
 ## Step 4: Pick a delivery mode
 
@@ -402,7 +407,8 @@ npx @armature-tech/mcp-analytics doctor --url http://localhost:3000/mcp
 Run it with the same `ANALYTICS_INGEST_API_KEY` and
 `ANALYTICS_INGEST_URL` environment as the server. It verifies the MCP
 handshake, every served tool's public wrapping contract, and ingest auth using
-an empty content-free batch. Use `--skip-ingest` only when the user explicitly
+an empty content-free batch. It also rejects a marked key whose region does
+not match the ingest or MCP URL without sending the key. Use `--skip-ingest` only when the user explicitly
 wants an offline check. Include the doctor result in the handoff.
 
 **Check 1 — Schema includes telemetry.** Spin up the server, ask it for `tools/list`, and

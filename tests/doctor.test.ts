@@ -10,6 +10,8 @@ import {
   detectLocalSdks,
   inspectToolCoverage,
   inspectMcp,
+  regionFromArmatureUrl,
+  regionFromIngestKey,
   runDoctor,
   verifyIngest,
   type DoctorDependencies,
@@ -164,6 +166,16 @@ test("detects local TypeScript, Python, and Go SDK declarations", async () => {
   }
 });
 
+test("identifies marked, legacy, and regional endpoint ownership", () => {
+  assert.equal(regionFromIngestKey("ami_eu_id_secret"), "eu");
+  assert.equal(regionFromIngestKey("ami_us_id_secret"), "us");
+  assert.equal(regionFromIngestKey("ami_legacy_id_secret"), "us");
+  assert.equal(regionFromArmatureUrl("https://eu.armature.tech/api/mcp"), "eu");
+  assert.equal(regionFromArmatureUrl("https://app.armature.tech/api/mcp"), "us");
+  assert.equal(regionFromArmatureUrl("https://eu.customer.example/mcp"), undefined);
+  assert.equal(regionFromArmatureUrl("http://localhost:3000/mcp"), undefined);
+});
+
 test("ingest probe sends only an empty authenticated batch", async () => {
   let receivedBody = "";
   let receivedAuthorization = "";
@@ -215,7 +227,7 @@ test("doctor reports healthy only when MCP wrapping and ingest both pass", async
     ANALYTICS_INGEST_API_KEY: "ami_test_secret",
   });
   assert.equal(report.healthy, true);
-  assert.deepEqual(report.checks.map((check) => check.status), ["pass", "pass", "pass", "pass", "pass"]);
+  assert.deepEqual(report.checks.map((check) => check.status), ["pass", "pass", "pass", "pass", "pass", "pass"]);
 
   const broken = await runDoctor(options, {
     ...dependencies,
@@ -225,6 +237,28 @@ test("doctor reports healthy only when MCP wrapping and ingest both pass", async
   assert.equal(broken.checks.find((check) => check.id === "tool-wrapping")?.status, "fail");
   assert.equal(broken.checks.find((check) => check.id === "ingest-auth")?.status, "fail");
   assert.ok(!JSON.stringify(broken).includes("ami_test_secret"));
+});
+
+test("doctor rejects a wrong-region key before sending an ingest probe", async () => {
+  const options = defaultDoctorOptions({
+    kind: "http",
+    url: "https://eu.armature.tech/api/mcp",
+    headers: {},
+  });
+  let probeCalls = 0;
+  const report = await runDoctor(options, {
+    detectLocalSdks: async () => [{ language: "typescript", declaration: "fixture" }],
+    inspectMcp: async () => ({ tools: [currentTool("search")] }),
+    verifyIngest: async () => { probeCalls += 1; },
+  }, {
+    ANALYTICS_INGEST_API_KEY: "ami_us_identifier_secret-that-must-not-appear",
+    ANALYTICS_INGEST_URL: "https://eu.armature.tech/api/mcp-analytics/ingest",
+  });
+  assert.equal(report.healthy, false);
+  assert.equal(report.checks.find((check) => check.id === "regional-configuration")?.status, "fail");
+  assert.equal(report.checks.find((check) => check.id === "ingest-auth")?.status, "fail");
+  assert.equal(probeCalls, 0);
+  assert.doesNotMatch(JSON.stringify(report), /secret-that-must-not-appear/);
 });
 
 test("doctor stays healthy when the SDK-owned request_capability tool is served", async () => {
