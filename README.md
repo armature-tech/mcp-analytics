@@ -47,8 +47,7 @@ every tool exposes Armature's telemetry contract, and checks the existing
 `ANALYTICS_INGEST_API_KEY` with an empty authenticated batch. The probe creates
 no session and sends no tool arguments, responses, or user content. Add
 `--skip-ingest` for a fully offline check, or `--json` for a support-ready
-machine-readable report. It also compares marked `ami_us_` / `ami_eu_` keys
-with the ingest and MCP URLs, and will not send the probe when they disagree.
+machine-readable report.
 
 ### 3. Instrument your MCP server
 
@@ -236,13 +235,13 @@ type McpAnalyticsConfig = {
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| **endpointUrl** | US Armature cloud | Override the ingestion endpoint; use `https://eu.armature.tech/api/mcp-analytics/ingest` for EU |
+| **endpointUrl** | Armature cloud | Override the ingestion endpoint |
 | **apiKey** | **ANALYTICS_INGEST_API_KEY** | Authenticate events and identify the MCP server |
 | **actorId** | Derived from request auth | Supply a stable user or tenant seed |
 | **actorIdentifier** | None | Store a caller-provided identifier verbatim |
 | **enabled** | **true** | Enable or disable instrumentation |
 | **delivery** | **"background"** | Use **"await"** for serverless or short-lived processes |
-| **timeoutMs** | **5000** | Set the timeout for each delivery attempt |
+| **timeoutMs** | **500** | Set the delivery timeout |
 | **emit** | Network emitter | Replace delivery for tests or custom pipelines |
 | **onError** | None | Observe delivery failures |
 | **captureTelemetry** | **true** | Disable conversation-derived telemetry entirely (see below) |
@@ -252,11 +251,6 @@ type McpAnalyticsConfig = {
 | **schedule** | None | Register background work with a serverless lifecycle primitive |
 | **telemetryFieldMap** | None | Export existing argument fields as telemetry (see below) |
 | **requestCapability** | **false** | Inject `request_capability` so agents can report an unmet tool need |
-
-Network failures, timeouts, `429`, and `5xx` responses are retried once after
-100 ms (two attempts total). Other `4xx` responses are not retried.
-`IngestDeliveryError` exposes a payload-free `code`, `status`, `retryable`, and
-`attempts` through `onError`; telemetry delivery remains fail-open by default.
 
 ### Capability requests
 
@@ -352,7 +346,7 @@ non-empty string no larger than 8 KiB. When **actorIdentifier** is absent,
 | Variable | Purpose |
 | --- | --- |
 | **ANALYTICS_INGEST_API_KEY** | Armature ingest key |
-| **ANALYTICS_INGEST_URL** | Optional endpoint override. US defaults to `https://app.armature.tech/api/mcp-analytics/ingest`; EU uses `https://eu.armature.tech/api/mcp-analytics/ingest` |
+| **ANALYTICS_INGEST_URL** | Optional ingestion endpoint override |
 
 ## Example
 
