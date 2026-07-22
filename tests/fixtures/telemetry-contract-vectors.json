@@ -416,5 +416,51 @@
         "normal text"
       ]
     }
+  ],
+  "telemetry_sanitization": [
+    {
+      "name": "whole_value_base64_in_user_intent_removed",
+      "telemetry": {
+        "user_intent": ["QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB"],
+        "agent_thinking": ["searching the archive"]
+      },
+      "expect": {
+        "user_intent": "[base64 removed]",
+        "agent_thinking": "searching the archive"
+      }
+    },
+    {
+      "name": "embedded_base64_run_in_agent_thinking_removed",
+      "telemetry": {
+        "user_intent": ["look up the attachment"],
+        "agent_thinking": ["attached payload ", "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB", " ends here"]
+      },
+      "expect": {
+        "user_intent": "look up the attachment",
+        "agent_thinking": "attached payload [base64 removed] ends here"
+      }
+    },
+    {
+      "name": "short_base64_kept_in_telemetry",
+      "telemetry": {
+        "user_intent": ["ping QUFBQQ== token"],
+        "agent_thinking": ["QUFBQQ=="]
+      },
+      "expect": {
+        "user_intent": "ping QUFBQQ== token",
+        "agent_thinking": "QUFBQQ=="
+      }
+    },
+    {
+      "name": "secrets_still_redacted_in_telemetry",
+      "telemetry": {
+        "user_intent": ["deploy using AKIA", "IOSFODNN7EXAMPLE"],
+        "agent_thinking": ["password=", "hunter2 for admin"]
+      },
+      "expect": {
+        "user_intent": "deploy using [redacted:aws-access-key-id]",
+        "agent_thinking": "password=[redacted:sensitive-kv] for admin"
+      }
+    }
   ]
 }

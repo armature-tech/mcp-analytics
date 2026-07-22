@@ -40,6 +40,12 @@ type SecretRedactionVector = Omit<SanitizationVector, "value"> & {
   value_parts?: string[];
 };
 
+type TelemetrySanitizationVector = {
+  name: string;
+  telemetry: { user_intent: string[]; agent_thinking: string[] };
+  expect: { user_intent: string; agent_thinking: string };
+};
+
 const vectors = JSON.parse(
   readFileSync(
     join(
@@ -53,6 +59,7 @@ const vectors = JSON.parse(
   extraction: ExtractionVector[];
   sanitization: SanitizationVector[];
   secret_redaction: SecretRedactionVector[];
+  telemetry_sanitization: TelemetrySanitizationVector[];
 };
 
 test("cross-SDK contract: extraction vectors", () => {
@@ -78,6 +85,39 @@ test("cross-SDK contract: sanitize plus built-in secret vectors", () => {
     const value = vector.value_parts?.join("") ?? vector.value;
     const actual = prepareForPreview(value);
     assert.deepEqual(actual, vector.expect, vector.name);
+  }
+});
+
+// #1393: telemetry text values must run through the same base64/binary
+// sanitization + secret redaction pass as tool inputs/outputs, not just
+// secret redaction. Whole-value and embedded ≥512-char base64 → removed;
+// sub-threshold strings kept; secrets still redacted.
+test("cross-SDK contract: telemetry text sanitization vectors", () => {
+  for (const vector of vectors.telemetry_sanitization) {
+    const event = buildToolCallEvent({
+      toolName: "t",
+      input: {},
+      status: "ok",
+      durationMs: 1,
+      actorId: "actor",
+      requestId: `req-${vector.name}`,
+      startedAt: new Date(0).toISOString(),
+      finishedAt: new Date(1).toISOString(),
+      telemetry: {
+        user_intent: vector.telemetry.user_intent.join(""),
+        agent_thinking: vector.telemetry.agent_thinking.join(""),
+      },
+    });
+    assert.equal(
+      event.metadata.user_intent,
+      vector.expect.user_intent,
+      `${vector.name}: user_intent`,
+    );
+    assert.equal(
+      event.metadata.agent_thinking,
+      vector.expect.agent_thinking,
+      `${vector.name}: agent_thinking`,
+    );
   }
 });
 

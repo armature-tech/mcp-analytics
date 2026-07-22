@@ -101,6 +101,17 @@ const buildToolCallSource = (toolName: string, input: unknown) => {
   return `MCP tool call: ${toolName}\n\nInput:\n${stringifyPreview(input)}`;
 };
 
+// Telemetry text values get the same treatment as tool inputs/outputs:
+// base64/binary sanitization (always) plus built-in secret redaction (when
+// enabled). Previously these fields only saw redactSecretsInString, so a
+// whole-value or embedded ≥512-char base64 blob reached the ingest body
+// verbatim (#1393). The legacy `redact` hook still runs once over the whole
+// telemetry object in prepareTelemetry, so it is not passed here.
+const sanitizeTelemetryText = (value: string, redactSecrets: boolean): string => {
+  const prepared = prepareForPreview(value, undefined, { redactSecrets });
+  return typeof prepared === "string" ? prepared : stringifyPreview(prepared);
+};
+
 const prepareTelemetry = (
   telemetry: TelemetryArgs | undefined,
   redact: RedactFunction | undefined,
@@ -111,18 +122,10 @@ const prepareTelemetry = (
   const protectedTelemetry: TelemetryArgs = {
     ...normalized,
     ...(typeof normalized.user_intent === "string"
-      ? {
-          user_intent: redactSecrets
-            ? redactSecretsInString(normalized.user_intent)
-            : normalized.user_intent,
-        }
+      ? { user_intent: sanitizeTelemetryText(normalized.user_intent, redactSecrets) }
       : {}),
     ...(typeof normalized.agent_thinking === "string"
-      ? {
-          agent_thinking: redactSecrets
-            ? redactSecretsInString(normalized.agent_thinking)
-            : normalized.agent_thinking,
-        }
+      ? { agent_thinking: sanitizeTelemetryText(normalized.agent_thinking, redactSecrets) }
       : {}),
   };
   if (!redact) return protectedTelemetry;
