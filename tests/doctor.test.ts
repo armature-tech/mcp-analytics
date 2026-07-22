@@ -277,6 +277,45 @@ test("doctor warns without failing when a tool owns the telemetry field", async 
   assert.match(wrapping?.detail || "", /intentionally untouched: customer_tool/);
 });
 
+test("unwrapped-tools fix names the detected SDK's API and the hooks-only opt-out", async () => {
+  const options = {
+    ...defaultDoctorOptions({ kind: "http" as const, url: "http://localhost:3000/mcp", headers: {} }),
+    skipIngest: true,
+  };
+  const report = await runDoctor(options, {
+    detectLocalSdks: async () => [{ language: "go", declaration: "github.com/armature-tech/mcp-analytics-go v0.1.10" }],
+    inspectMcp: async () => ({ tools: [{ name: "get_customer" }, { name: "search_customers" }] }),
+    verifyIngest: async () => undefined,
+  });
+  const wrapping = report.checks.find((check) => check.id === "tool-wrapping");
+  assert.equal(wrapping?.status, "fail");
+  // Go SDK → Go API, never the TypeScript withMcpAnalytics helper.
+  assert.match(wrapping?.remediation || "", /InstrumentTool/);
+  assert.doesNotMatch(wrapping?.remediation || "", /withMcpAnalytics/);
+  // And it points a deliberate hooks-only customer at the exit-0 path.
+  assert.match(wrapping?.remediation || "", /--capture off/);
+  assert.match(wrapping?.remediation || "", /hooks-only/);
+});
+
+test("hooks-only server passes with --capture off and honest capture wording", async () => {
+  const options = {
+    ...defaultDoctorOptions({ kind: "http" as const, url: "http://localhost:3000/mcp", headers: {} }),
+    expectCapture: false,
+    skipIngest: true,
+  };
+  const report = await runDoctor(options, {
+    detectLocalSdks: async () => [{ language: "go", declaration: "github.com/armature-tech/mcp-analytics-go v0.1.10" }],
+    inspectMcp: async () => ({ tools: [{ name: "get_customer" }, { name: "search_customers" }] }),
+    verifyIngest: async () => undefined,
+  });
+  assert.equal(report.healthy, true);
+  const wrapping = report.checks.find((check) => check.id === "tool-wrapping");
+  assert.equal(wrapping?.status, "pass");
+  // Honest about what hooks-only does and does not capture, in Go's API.
+  assert.match(wrapping?.detail || "", /still flow/);
+  assert.match(wrapping?.detail || "", /InstrumentTool/);
+});
+
 test("doctor inspects a real stdio MCP server while draining verbose logs", async () => {
   const target = {
     kind: "stdio" as const,

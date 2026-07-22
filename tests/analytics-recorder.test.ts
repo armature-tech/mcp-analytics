@@ -1142,6 +1142,96 @@ test("two tool calls sharing the same JSON-RPC requestId get distinct event_ids"
   );
 });
 
+test("a caller-supplied requestId is scoped by session: distinct across sessions, idempotent within one (#1402)", async () => {
+  // Shape-C dispatcher hazard: an integrator passes a per-connection JSON-RPC
+  // message id (0, 1, 2, …) as `requestId`. Under anonymous traffic (constant
+  // actor_id) two concurrent conversations reuse the same id and must NOT
+  // collide on event_id, or ingest silently dedupes the second away. Scoping
+  // the caller id by the session id fixes cross-session collisions while
+  // preserving within-session idempotency for a genuine retry.
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: "anonymous",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  const record = (sessionId: string) =>
+    recorder.recordToolCall({
+      name: "lookup_customer",
+      args: {},
+      sessionId,
+      requestId: "5", // same transport counter value across both conversations
+      status: "ok",
+    });
+
+  await record("session-A");
+  await record("session-B"); // different conversation, same requestId "5"
+  await record("session-A"); // genuine retry within the first conversation
+
+  const toolCalls = batches
+    .flatMap((batch) => batch.events)
+    .filter((event) => event.kind === "tool_call");
+  assert.equal(toolCalls.length, 3);
+  assert.notEqual(
+    toolCalls[0]?.event_id,
+    toolCalls[1]?.event_id,
+    "same requestId across sessions must not collide",
+  );
+  assert.equal(
+    toolCalls[0]?.event_id,
+    toolCalls[2]?.event_id,
+    "same requestId within a session must de-dup (idempotency preserved)",
+  );
+});
+
+test("empty-string and null requestIds mint fresh uuids instead of fixed session-scoped seeds", async () => {
+  // Regression: `""` is not an idempotency key. Left as-is it would scope to
+  // the constant `${sessionId}#` seed, so every empty-id call in a session
+  // collides on event_id and ingest dedupes all but the first away. Empty must
+  // behave like absent (mint a uuid), matching the Python and Go SDKs. A `null`
+  // from an untyped JS caller is the same degenerate shape and must also mint.
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: "anonymous",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  const record = (requestId: string) =>
+    recorder.recordToolCall({
+      name: "lookup_customer",
+      args: {},
+      sessionId: "session-A",
+      requestId,
+      status: "ok",
+    });
+
+  await record("");
+  await record("");
+  await record(null as unknown as string);
+  await record(null as unknown as string);
+
+  const toolCalls = batches
+    .flatMap((batch) => batch.events)
+    .filter((event) => event.kind === "tool_call");
+  assert.equal(toolCalls.length, 4);
+  const ids = toolCalls.map((event) => event.event_id);
+  assert.equal(
+    new Set(ids).size,
+    ids.length,
+    "degenerate requestIds must not produce colliding fixed seeds",
+  );
+});
+
 test("nested tool calls that forward the handler context get distinct event_ids", async () => {
   // Regression: the handler context built for a registered tool must not carry
   // the MCP JSON-RPC request id. A handler that fans out to a nested tool and

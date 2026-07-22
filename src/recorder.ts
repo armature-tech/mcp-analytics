@@ -253,8 +253,8 @@ export const createAnalyticsRecorder = (
       durationMs,
       finishedAtMs,
     });
-    const requestId = normalizeRequestId(event.requestId);
     const sessionId = resolveSessionId(event);
+    const requestId = normalizeRequestId(event.requestId, sessionId);
     const errorMessage = event.error === undefined
       ? undefined
       : event.error instanceof Error

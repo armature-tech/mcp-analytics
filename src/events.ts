@@ -442,10 +442,27 @@ export const normalizeSessionId = (
 // counter (0, 1, 2, …) that restarts on reconnect, across stateless gateway
 // instances, etc., so two unrelated tool calls routinely share `extra.requestId`
 // and would collide on `event_id` — making ingest dedupe the second call away.
-// An explicit caller-supplied id still wins (it's a deliberate idempotency key);
-// otherwise we mint a fresh uuid, matching the prototype-patch path in server.ts.
-export const normalizeRequestId = (eventRequestId: string | undefined) => {
-  return eventRequestId ?? randomUUID();
+//
+// When no id is supplied we mint a fresh uuid (matching the prototype-patch path
+// in server.ts), which is globally unique and needs no further scoping. A
+// caller-supplied id is treated as a deliberate idempotency key, but is scoped
+// by the resolved session id when one is known: `${sessionId}#${id}`. That keeps
+// within-session idempotency (a genuine retry reusing the same id de-dups) while
+// making a hazardous transport counter reused across concurrent conversations
+// collision-free — two sessions that both send request id "5" hash to different
+// `event_id`s. See the cross-SDK "Event identity and idempotency" section of
+// packages/TELEMETRY-CONTRACT.md.
+export const normalizeRequestId = (
+  eventRequestId: string | undefined,
+  sessionId?: string,
+) => {
+  // `== null` also mints for a `null` an untyped JS caller may pass, matching
+  // the previous `?? randomUUID()`; a degenerate `null` must never seed a hash.
+  // An empty string is equally degenerate — it would collapse every such call
+  // into one fixed `${sessionId}#` seed and collide on event_id — so it mints
+  // too, matching the Python (`if not event_request_id`) and Go (`== ""`) SDKs.
+  if (eventRequestId == null || eventRequestId === "") return randomUUID();
+  return sessionId ? `${sessionId}#${eventRequestId}` : eventRequestId;
 };
 
 export const normalizeStartedAt = ({

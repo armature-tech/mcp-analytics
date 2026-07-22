@@ -60,10 +60,59 @@ export const resolveActorIdentifier = async (
     : undefined;
 };
 
+type IngestRejection = { event_id?: string | null; reason?: string };
+
+export type IngestResult = {
+  skipped: boolean;
+  ok?: boolean;
+  reason?: string;
+  status?: number;
+  accepted?: number;
+  rejected?: IngestRejection[];
+  duplicateCount?: number;
+};
+
+/**
+ * Ingest answers HTTP 200 even when it refuses events in the response body
+ * (validation, quota, schema drift — `rejected` non-empty, or everything
+ * refused with nothing accepted). A producer that checks only the status code
+ * treats that as delivered and never fires `onError` (#1403). This carries the
+ * refusal so the emit path can surface it through the normal error channel.
+ */
+export class IngestRejectedError extends Error {
+  readonly rejected: IngestRejection[];
+  readonly accepted: number;
+  constructor(rejected: IngestRejection[], accepted: number) {
+    const reasons = Array.from(
+      new Set(rejected.map((item) => item?.reason).filter((r): r is string => Boolean(r))),
+    );
+    const detail = reasons.length > 0 ? ` (${reasons.join(", ")})` : "";
+    super(`Armature ingest rejected ${rejected.length} event(s)${detail}`);
+    this.name = "IngestRejectedError";
+    this.rejected = rejected;
+    this.accepted = accepted;
+  }
+}
+
+// A 200 that refuses events in-body: any explicit rejection, or nothing
+// accepted from a non-empty batch. Server-side dedup counts as accepted, so a
+// benign session_init re-delivery does NOT trip this.
+export const describeIngestRejection = (
+  result: IngestResult,
+  eventCount: number,
+): IngestRejectedError | null => {
+  if (result.skipped) return null;
+  const rejected = Array.isArray(result.rejected) ? result.rejected : [];
+  const accepted = typeof result.accepted === "number" ? result.accepted : undefined;
+  if (rejected.length > 0) return new IngestRejectedError(rejected, accepted ?? 0);
+  if (accepted === 0 && eventCount > 0) return new IngestRejectedError([], 0);
+  return null;
+};
+
 export const postTelemetryEvent = async (
   batch: AnalyticsIngestBatch,
   config: McpAnalyticsConfig = defaultMcpAnalyticsConfig,
-) => {
+): Promise<IngestResult> => {
   const endpointUrl = resolveEndpointUrl(config);
   const apiKey = resolveApiKey(config);
 
@@ -89,14 +138,46 @@ export const postTelemetryEvent = async (
       signal: controller.signal,
     });
 
+    const text = await response.text();
     if (!response.ok) {
-      throw new Error(`Armature ingest failed with ${response.status}: ${await response.text()}`);
+      throw new Error(`Armature ingest failed with ${response.status}: ${text}`);
     }
 
-    return { skipped: false, ok: true, status: response.status };
+    // The body carries in-band rejection/dedup even on 200; parse it so the
+    // emit path can raise on refused events (#1403). A non-JSON body just
+    // means we cannot observe rejections, not a delivery failure.
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch {
+      parsed = {};
+    }
+    return {
+      skipped: false,
+      ok: true,
+      status: response.status,
+      accepted: typeof parsed.accepted === "number" ? parsed.accepted : undefined,
+      rejected: Array.isArray(parsed.rejected) ? (parsed.rejected as IngestRejection[]) : [],
+      duplicateCount:
+        typeof parsed.duplicate_count === "number" ? parsed.duplicate_count : undefined,
+    };
   } finally {
     clearTimeout(timeout);
   }
+};
+
+// The default network emit for every delivery path (privacy queue, flushable
+// emitter, one-shot emit): POST, then raise on in-body rejection so the caller's
+// try/catch routes it to `onError`, just like a transport failure. This MUST be
+// the shared default so the recorder's real path (the privacy queue) also
+// surfaces rejections (#1403).
+export const postAndCheck = async (
+  batch: AnalyticsIngestBatch,
+  config: McpAnalyticsConfig,
+): Promise<void> => {
+  const result = await postTelemetryEvent(batch, config);
+  const rejection = describeIngestRejection(result, batch.events.length);
+  if (rejection) throw rejection;
 };
 
 export const reportEmitError = (
@@ -123,9 +204,7 @@ export const emitTelemetryEvent = (
 
   const emit =
     config.armature?.emit ??
-    (async (telemetryBatch: AnalyticsIngestBatch) => {
-      await postTelemetryEvent(telemetryBatch, config);
-    });
+    ((telemetryBatch: AnalyticsIngestBatch) => postAndCheck(telemetryBatch, config));
 
   const run = async () => {
     try {
@@ -155,9 +234,7 @@ export const createFlushableEmitter = (config: McpAnalyticsConfig) => {
 
     const emit =
       config.armature?.emit ??
-      (async (telemetryBatch: AnalyticsIngestBatch) => {
-        await postTelemetryEvent(telemetryBatch, config);
-      });
+      ((telemetryBatch: AnalyticsIngestBatch) => postAndCheck(telemetryBatch, config));
 
     const run = async () => {
       try {

@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Caller-supplied request ids are scoped by session (no more silent event loss)
+
+A `requestId` seeds the tool-call `event_id`, which ingest de-dups on. A caller
+that passed a transport JSON-RPC message id (a per-connection counter reused
+across concurrent conversations) made anonymous sessions collide on `event_id`,
+so ingest silently dropped the duplicates. `normalizeRequestId` now scopes a
+caller-supplied id by the resolved session id (`"{sessionId}#{id}"`), preserving
+within-session idempotency while making cross-session collisions impossible.
+Minted uuids (the default when no id is supplied) are unchanged. See the
+"Event identity and idempotency" section of `packages/TELEMETRY-CONTRACT.md`.
+
+### Ingest rejections surfaced instead of read as success
+
+The ingest endpoint answers HTTP 200 even when it refuses events in the response
+body. The network emitter now parses that body and raises an `IngestRejectedError`
+through the normal delivery-error channel (`onError`) when any event is rejected,
+or when a non-empty batch had nothing accepted. Server-side dedup counts as
+accepted, so benign session_init re-delivery does not fire the hook. The doctor
+ingest probe applies the same body check.
+
 ### Registry-style tools keep their output schemas and annotations
 
 `ToolRegistration` now accepts `outputSchema` and `annotations`, and the

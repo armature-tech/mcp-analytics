@@ -85,6 +85,7 @@ export {
 export {
   defaultMcpAnalyticsConfig,
   emitTelemetryEvent,
+  IngestRejectedError,
   postTelemetryEvent,
   reportEmitError,
 } from "./emit.js";

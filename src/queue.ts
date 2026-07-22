@@ -1,5 +1,5 @@
 import {
-  postTelemetryEvent,
+  postAndCheck,
   reportEmitError,
 } from "./emit.js";
 import type {
@@ -50,9 +50,7 @@ export const createPrivacyQueue = (config: McpAnalyticsConfig): PrivacyQueue => 
 
   const emit = async (batch: AnalyticsIngestBatch) => {
     const emitter = config.armature?.emit
-      ?? (async (value: AnalyticsIngestBatch) => {
-        await postTelemetryEvent(value, config);
-      });
+      ?? ((value: AnalyticsIngestBatch) => postAndCheck(value, config));
     try {
       await emitter(batch);
     } catch (error) {

@@ -296,14 +296,56 @@ export const verifyIngest = async (
       body: JSON.stringify({ schema_version: 1, events: [] }),
       signal: controller.signal,
     });
-    // Drain the body so undici can release its pooled connection promptly and
-    // the one-shot CLI does not appear to hang after printing the report.
-    await response.arrayBuffer();
+    // Read the body so undici can release its pooled connection promptly (the
+    // one-shot CLI must not appear to hang) and so we can surface an in-band
+    // rejection — ingest answers 200 even when it refuses events (#1403). The
+    // health probe sends an empty batch, so a rejection here signals the server
+    // is refusing well-formed authenticated requests, not a per-event issue.
+    const text = await response.text();
     if (!response.ok) {
       throw new Error(`Armature ingest returned HTTP ${response.status}`);
     }
+    try {
+      const parsed = JSON.parse(text || "{}") as { rejected?: unknown };
+      if (Array.isArray(parsed.rejected) && parsed.rejected.length > 0) {
+        const reasons = Array.from(
+          new Set(
+            parsed.rejected
+              .map((item) => (isRecord(item) && typeof item.reason === "string" ? item.reason : null))
+              .filter((reason): reason is string => Boolean(reason)),
+          ),
+        );
+        throw new Error(
+          `Armature ingest refused the health probe: ${parsed.rejected.length} event(s) rejected`
+            + (reasons.length > 0 ? ` (${reasons.join(", ")})` : ""),
+        );
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Armature ingest refused")) throw error;
+      // A non-JSON 200 body is not a rejection signal; reachability already passed.
+    }
   } finally {
     clearTimeout(timer);
+  }
+};
+
+// The tool-wrapping remediation must name the API of the SDK the doctor
+// actually detected — telling a Go customer to "register tools inside
+// withMcpAnalytics" (a TypeScript-only helper) sends them in circles,
+// especially when they are already using an Armature recorder (the
+// documented Go hooks-only shape: NewRecorder + WithHooks). `language`
+// is the SDK detected by detectLocalSdks; undefined falls back to a
+// cross-language phrasing.
+const wrapApiFor = (language?: LocalSdk["language"]): string => {
+  switch (language) {
+    case "go":
+      return "InstrumentTool / InstrumentToolWithConfig";
+    case "python":
+      return "instrument_fastmcp (or an Armature recorder)";
+    case "typescript":
+      return "withMcpAnalytics (or an Armature recorder)";
+    default:
+      return "the SDK's tool instrumentation (InstrumentTool / withMcpAnalytics / instrument_fastmcp)";
   }
 };
 
@@ -323,9 +365,13 @@ export const runDoctor = async (
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<DoctorReport> => {
   const checks: DoctorCheck[] = [];
+  // Remember the detected SDK so the wrapping check can phrase its fix in
+  // that language's API (the first detected wins if several coexist).
+  let detectedLanguage: LocalSdk["language"] | undefined;
 
   try {
     const sdks = await dependencies.detectLocalSdks(options.cwd);
+    detectedLanguage = sdks[0]?.language;
     if (sdks.length === 0) {
       checks.push(warn(
         "sdk-declaration",
@@ -370,7 +416,12 @@ export const runDoctor = async (
       if (!options.expectCapture) {
         const exposed = coverage.current.length + coverage.legacy.length;
         checks.push(exposed === 0
-          ? pass("tool-wrapping", "Telemetry capture", "No Armature telemetry fields are advertised, as requested.")
+          ? pass(
+              "tool-wrapping",
+              "Telemetry capture",
+              "No Armature telemetry fields are advertised, as requested. "
+                + `Tool-call and session analytics still flow; capturing user_intent/agent_thinking requires wrapping tools with ${wrapApiFor(detectedLanguage)}.`,
+            )
           : warn(
               "tool-wrapping",
               "Telemetry capture",
@@ -383,7 +434,8 @@ export const runDoctor = async (
           "tool-wrapping",
           "Tool wrapping",
           `${coverage.missing.length}/${coverage.total} tools do not expose the Armature telemetry contract${sample ? `: ${sample}` : ""}.`,
-          "Wrap the same server instance that is started, and register tools inside withMcpAnalytics or through an Armature recorder.",
+          `Wrap the same server instance that is started, and register tools with ${wrapApiFor(detectedLanguage)}. `
+            + "If this server intentionally uses hooks-only capture (an Armature recorder + hooks, no per-tool wrapping), tool-call and session analytics still flow — re-run with --capture off to treat unwrapped tools as expected and keep exit 0.",
         ));
       } else if (coverage.legacy.length > 0) {
         checks.push(warn(
