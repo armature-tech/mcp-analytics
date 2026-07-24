@@ -61,7 +61,7 @@ export type McpInspection = {
 };
 
 export type LocalSdk = {
-  language: "typescript" | "python" | "go";
+  language: "typescript" | "python" | "go" | "php";
   declaration: string;
 };
 
@@ -337,6 +337,25 @@ export const detectLocalSdks = async (cwd: string): Promise<LocalSdk[]> => {
     ?.match(/github\.com\/armature-tech\/mcp-analytics-go(?:\/[^\s]+)?\s+v[^\s)]+/)?.[0];
   if (goDeclaration) found.push({ language: "go", declaration: goDeclaration });
 
+  const composerJson = await readIfPresent(resolve(cwd, "composer.json"));
+  if (composerJson) {
+    try {
+      const parsed = JSON.parse(composerJson) as UnknownRecord;
+      const sections = [parsed.require, parsed["require-dev"]];
+      for (const section of sections) {
+        if (isRecord(section) && typeof section["armature/mcp-analytics"] === "string") {
+          found.push({
+            language: "php",
+            declaration: `armature/mcp-analytics ${section["armature/mcp-analytics"]}`,
+          });
+          break;
+        }
+      }
+    } catch {
+      // A malformed composer.json will be reported by Composer.
+    }
+  }
+
   return found;
 };
 
@@ -413,8 +432,10 @@ const wrapApiFor = (language?: LocalSdk["language"]): string => {
       return "instrument_fastmcp (or an Armature recorder)";
     case "typescript":
       return "withMcpAnalytics (or an Armature recorder)";
+    case "php":
+      return "Analytics::instrument (or an Armature Recorder)";
     default:
-      return "the SDK's tool instrumentation (InstrumentTool / withMcpAnalytics / instrument_fastmcp)";
+      return "the SDK's tool instrumentation (InstrumentTool / withMcpAnalytics / instrument_fastmcp / Analytics::instrument)";
   }
 };
 

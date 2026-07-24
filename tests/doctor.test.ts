@@ -151,7 +151,7 @@ test("parses HTTP and stdio targets without accepting an inline ingest key", () 
   );
 });
 
-test("detects local TypeScript, Python, and Go SDK declarations", async () => {
+test("detects local TypeScript, Python, Go, and PHP SDK declarations", async () => {
   const directory = await mkdtemp(join(tmpdir(), "armature-doctor-"));
   try {
     await writeFile(join(directory, "package.json"), JSON.stringify({
@@ -159,8 +159,11 @@ test("detects local TypeScript, Python, and Go SDK declarations", async () => {
     }));
     await writeFile(join(directory, "pyproject.toml"), 'dependencies = ["armature-mcp-analytics>=0.8"]\n');
     await writeFile(join(directory, "go.mod"), "module example.com/customer\n\nrequire github.com/armature-tech/mcp-analytics-go v0.8.0\n");
+    await writeFile(join(directory, "composer.json"), JSON.stringify({
+      require: { "armature/mcp-analytics": "^0.1" },
+    }));
     const sdks = await detectLocalSdks(directory);
-    assert.deepEqual(sdks.map((sdk) => sdk.language), ["typescript", "python", "go"]);
+    assert.deepEqual(sdks.map((sdk) => sdk.language), ["typescript", "python", "go", "php"]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -329,6 +332,22 @@ test("unwrapped-tools fix names the detected SDK's API and the hooks-only opt-ou
   // And it points a deliberate hooks-only customer at the exit-0 path.
   assert.match(wrapping?.remediation || "", /--capture off/);
   assert.match(wrapping?.remediation || "", /hooks-only/);
+});
+
+test("unwrapped-tools fix names the PHP SDK's instrumentation API", async () => {
+  const options = {
+    ...defaultDoctorOptions({ kind: "http" as const, url: "http://localhost:3000/mcp", headers: {} }),
+    skipIngest: true,
+  };
+  const report = await runDoctor(options, {
+    detectLocalSdks: async () => [{ language: "php", declaration: "armature/mcp-analytics ^0.1" }],
+    inspectMcp: async () => ({ tools: [{ name: "get_customer" }] }),
+    verifyIngest: async () => undefined,
+  });
+  const wrapping = report.checks.find((check) => check.id === "tool-wrapping");
+  assert.equal(wrapping?.status, "fail");
+  assert.match(wrapping?.remediation || "", /Analytics::instrument/);
+  assert.doesNotMatch(wrapping?.remediation || "", /withMcpAnalytics/);
 });
 
 test("hooks-only server passes with --capture off and honest capture wording", async () => {
