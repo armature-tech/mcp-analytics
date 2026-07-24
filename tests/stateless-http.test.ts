@@ -83,6 +83,14 @@ test("run-scoped session seed keeps proxy reconnects in one identity-bearing ses
   assert.equal(call.sessionId, first.sessionId);
 });
 
+test("run-scoped session seeds accept time-ordered UUID v7 values", () => {
+  const seed = "019f942a-5d64-7322-8e50-5d17333768d9";
+  assert.equal(
+    buildStatelessSessionId({ name: "client" }, seed),
+    `mcp_client_v__${seed}`,
+  );
+});
+
 test("invalid session seeds never control the minted identifier", () => {
   const session = resolveStatelessHttpSession({
     body: { method: "initialize", params: { clientInfo: { name: "client" } } },

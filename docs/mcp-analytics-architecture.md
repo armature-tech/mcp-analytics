@@ -1,4 +1,10 @@
-# MCP Analytics SDK Architecture
+# TypeScript MCP Analytics SDK Architecture
+
+This note describes the TypeScript wrapper. For the current cross-language
+architecture, parity rules, and maintenance workflow, see
+[`../../SDK-MAINTENANCE.md`](../../SDK-MAINTENANCE.md). Normative capture and
+privacy behavior lives in
+[`../../TELEMETRY-CONTRACT.md`](../../TELEMETRY-CONTRACT.md).
 
 ## Core Idea
 
@@ -64,8 +70,8 @@ sequenceDiagram
   SDK-->>MCP: tool result
   MCP-->>Agent: tool result
 
-  SDK->>SDK: schedule telemetry emission<br/>with setImmediate
-  SDK--)Armature: POST /telemetry<br/>{ tool_name, telemetry, input, output, status, duration_ms }
+  SDK->>SDK: enqueue event candidate<br/>in bounded privacy queue
+  SDK--)Armature: POST /api/mcp-analytics/ingest<br/>{ schema_version, events[] }
 ```
 
 ## Example Shape
@@ -112,7 +118,11 @@ Original example handler receives:
 
 The example service receives only the original example-compatible args. It never receives `telemetry`, `user_intent`, or agent metadata.
 
-Armature receives the analytics payload asynchronously:
+Armature receives a schema-version-1 event in a batch. With the default
+background delivery mode the bounded privacy queue schedules finalization
+after the tool path; with `delivery: "await"` the call waits for the queue to
+drain. Serverless integrations should use awaited delivery or supply the
+platform lifecycle `schedule` hook.
 
 ```ts
 {
@@ -150,6 +160,13 @@ const server = createMcpAnalyticsServer(
 - `user_intent` is analytics-only data; it must never be passed to Example MCP handlers or example APIs.
 - Example MCP server code remains the owner of example service behavior.
 - The SDK never calls Example MCP directly.
-- Telemetry emission is scheduled with `setImmediate` after the tool result is returned and must not block the tool call.
+- Background delivery enqueues a bounded privacy candidate after the handler
+  resolves and does not block the tool call; awaited delivery deliberately
+  drains before returning.
+- Privacy-sensitive finalization runs in queue order before serialization and
+  ingest.
+- The queue holds at most 1,000 candidates and emits batches of at most 20.
 - Armature receives telemetry, stripped tool input, tool output, status, duration, and request id.
+- Ingest uses `/api/mcp-analytics/ingest`, a five-second timeout, and at most
+  two attempts for retryable failures.
 - There is no MCP-to-MCP middleware hop.
