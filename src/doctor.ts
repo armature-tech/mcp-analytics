@@ -17,6 +17,7 @@ const LEGACY_TELEMETRY_MARKERS = [
 ];
 
 type UnknownRecord = Record<string, unknown>;
+type DeploymentRegion = "us" | "eu";
 
 export type DoctorStatus = "pass" | "warn" | "fail";
 
@@ -77,6 +78,74 @@ const isRecord = (value: unknown): value is UnknownRecord => (
 const errorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message) return error.message;
   return String(error || "unknown error");
+};
+
+const regionLabel = (region: DeploymentRegion): string => region.toUpperCase();
+
+export const regionFromIngestKey = (apiKey: string | undefined): DeploymentRegion | undefined => {
+  if (!apiKey) return undefined;
+  const marked = apiKey.match(/^ami_(us|eu)_/i)?.[1]?.toLowerCase();
+  if (marked === "us" || marked === "eu") return marked;
+  // Legacy unmarked keys remain US for backward compatibility.
+  return /^ami_[a-z0-9]/i.test(apiKey) ? "us" : undefined;
+};
+
+export const regionFromArmatureUrl = (rawUrl: string | undefined): DeploymentRegion | undefined => {
+  if (!rawUrl) return undefined;
+  try {
+    const hostname = new URL(rawUrl).hostname.toLowerCase();
+    if (
+      hostname === "eu.armature.tech"
+      || hostname.endsWith(".eu.armature.tech")
+    ) return "eu";
+    if (hostname === "app.armature.tech" || hostname === "mcp.armature.tech") return "us";
+  } catch {
+    return undefined;
+  }
+  return undefined;
+};
+
+const regionalConfigurationCheck = (
+  target: DoctorTarget,
+  endpoint: string,
+  apiKey: string | undefined,
+): DoctorCheck => {
+  const sources: Array<{ label: string; region: DeploymentRegion | undefined }> = [
+    { label: "ingest key", region: regionFromIngestKey(apiKey) },
+    { label: "ingest endpoint", region: regionFromArmatureUrl(endpoint) },
+    {
+      label: "MCP target",
+      region: target.kind === "http" ? regionFromArmatureUrl(target.url) : undefined,
+    },
+  ];
+  const recognized = sources.filter(
+    (source): source is { label: string; region: DeploymentRegion } => source.region !== undefined,
+  );
+  const distinct = new Set(recognized.map((source) => source.region));
+  if (distinct.size > 1) {
+    return fail(
+      "regional-configuration",
+      "Regional configuration",
+      recognized.map((source) => `${source.label} is ${regionLabel(source.region)}`).join(", ") + ".",
+      "Use an ingest key, ingest endpoint, and MCP application URL from the same region. The doctor will not probe a mismatched endpoint.",
+    );
+  }
+  if (recognized.length >= 2) {
+    const region = recognized[0]?.region as DeploymentRegion;
+    return pass(
+      "regional-configuration",
+      "Regional configuration",
+      `${recognized.map((source) => source.label).join(" and ")} agree on ${regionLabel(region)}.`,
+    );
+  }
+  return warn(
+    "regional-configuration",
+    "Regional configuration",
+    recognized.length === 1
+      ? `Only the ${recognized[0]?.label} identifies a known Armature region.`
+      : "The key and URLs do not identify a known Armature region.",
+    "For production, use an ami_us_ or ami_eu_ key and the matching regional Armature URLs.",
+  );
 };
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
@@ -474,6 +543,11 @@ export const runDoctor = async (
     ));
   }
 
+  const apiKey = environment.ANALYTICS_INGEST_API_KEY;
+  const endpoint = environment.ANALYTICS_INGEST_URL || DEFAULT_INGEST_URL;
+  const regionalCheck = regionalConfigurationCheck(options.target, endpoint, apiKey);
+  checks.push(regionalCheck);
+
   if (options.skipIngest) {
     checks.push(warn(
       "ingest-auth",
@@ -481,14 +555,19 @@ export const runDoctor = async (
       "Skipped by --skip-ingest; no network request was made.",
     ));
   } else {
-    const apiKey = environment.ANALYTICS_INGEST_API_KEY;
-    const endpoint = environment.ANALYTICS_INGEST_URL || DEFAULT_INGEST_URL;
     if (!apiKey) {
       checks.push(fail(
         "ingest-auth",
         "Armature ingest",
         "ANALYTICS_INGEST_API_KEY is not set in the doctor environment.",
         "Export the same ingest key used by the MCP server, then run the doctor again.",
+      ));
+    } else if (regionalCheck.status === "fail") {
+      checks.push(fail(
+        "ingest-auth",
+        "Armature ingest",
+        "Skipped the authenticated health probe because the regional configuration is inconsistent.",
+        "Correct the regional mismatch, then run the doctor again.",
       ));
     } else {
       try {

@@ -48,6 +48,9 @@ const config = () => ({
     delivery: "await",
     timeoutMs: 10_000,
     actorId: "sdk-canary-shared-actor",
+    // This canary asserts an exact tool list; opt out of the on-by-default
+    // request_capability tool so it stays focused on the echo tools.
+    requestCapability: false,
   },
 });
 const ok = value => ({ content: [{ type: "text", text: value }] });

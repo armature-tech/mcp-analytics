@@ -25,14 +25,44 @@ const collectBatches = () => {
   };
 };
 
-test("request_capability is disabled by default and when analytics is disabled", () => {
+test("request_capability is off without a delivery path or when analytics is disabled", () => {
+  // No ingest sink configured -> nothing to deliver, so nothing is injected
+  // regardless of the default.
   assert.equal(createAnalyticsRecorder().hasTool(REQUEST_CAPABILITY_TOOL_NAME), false);
+  // Analytics explicitly disabled.
   assert.equal(
     createAnalyticsRecorder({
       armature: { enabled: false, requestCapability: true },
     }).hasTool(REQUEST_CAPABILITY_TOOL_NAME),
     false,
   );
+});
+
+test("request_capability is on by default once a delivery path is configured", () => {
+  // requestCapability unset -> injected because a sink exists.
+  assert.equal(
+    createAnalyticsRecorder({ armature: { emit: () => undefined } })
+      .hasTool(REQUEST_CAPABILITY_TOOL_NAME),
+    true,
+  );
+  // Explicit opt-out disables it.
+  assert.equal(
+    createAnalyticsRecorder({ armature: { emit: () => undefined, requestCapability: false } })
+      .hasTool(REQUEST_CAPABILITY_TOOL_NAME),
+    false,
+  );
+});
+
+test("a customer request_capability tool wins over the on-by-default SDK tool", () => {
+  const recorder = createAnalyticsRecorder({
+    // On by default (sink present), not explicitly opted in.
+    armature: { emit: () => undefined },
+  });
+  // No throw: the customer's tool takes precedence instead of being reserved.
+  assert.doesNotThrow(() => recorder.tool(
+    { name: REQUEST_CAPABILITY_TOOL_NAME },
+    async () => ({ content: [{ type: "text", text: "customer" }] }),
+  ));
 });
 
 test("recorder injects and records request_capability when enabled", async () => {
@@ -98,18 +128,42 @@ test("request_capability is suppressed without a configured delivery path", () =
   assert.equal(recorder.hasTool(REQUEST_CAPABILITY_TOOL_NAME), false);
 });
 
-test("Mastra low-level wrapper rejects a mismatched recorder configuration", () => {
-  const recorder = createAnalyticsRecorder({
-    armature: { requestCapability: true, emit: () => undefined },
-  });
+test("withMcpAnalytics throws for a non-McpServer only when explicitly opted in", () => {
+  // Explicit opt-in keeps the hard error.
   assert.throws(
-    () => wrapMastraToolsWithRecorder(
-      {},
-      recorder,
-      { armature: { apiKey: "" } },
+    () => withMcpAnalytics(
+      { armature: { emit: () => undefined, requestCapability: true } },
+      () => ({ notAnMcpServer: true }),
     ),
-    /configuration does not match the supplied analytics recorder/,
+    /requires the server factory to return an McpServer instance/,
   );
+  // On by default, an incompatible factory result skips injection quietly.
+  assert.doesNotThrow(
+    () => withMcpAnalytics(
+      { armature: { emit: () => undefined } },
+      () => ({ notAnMcpServer: true }),
+    ),
+  );
+});
+
+test("Mastra low-level wrapper follows the recorder for request_capability", () => {
+  // The recorder is the source of truth: it has the tool (on by default with a
+  // sink), so the wrapper injects it even when the lean wrap-time config omits
+  // the delivery sink instead of throwing a mismatch error.
+  const recorder = createAnalyticsRecorder({
+    armature: { emit: () => undefined },
+  });
+  // The return type now honestly includes an optional request_capability key,
+  // so it can be read without a cast.
+  const wrapped = wrapMastraToolsWithRecorder({}, recorder, { armature: { apiKey: "" } });
+  assert.ok(wrapped[REQUEST_CAPABILITY_TOOL_NAME]);
+
+  // A recorder without the tool never injects it.
+  const off = createAnalyticsRecorder({
+    armature: { emit: () => undefined, requestCapability: false },
+  });
+  const wrappedOff = wrapMastraToolsWithRecorder({}, off, {});
+  assert.equal(wrappedOff[REQUEST_CAPABILITY_TOOL_NAME], undefined);
 });
 
 test("attached McpServer advertises the exact request_capability contract", async () => {

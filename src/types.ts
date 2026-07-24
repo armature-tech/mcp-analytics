@@ -118,8 +118,9 @@ export type McpAnalyticsConfig = {
     /** Register background work with a platform lifecycle primitive (for example waitUntil). */
     schedule?: (work: Promise<void>) => void;
     telemetryFieldMap?: TelemetryFieldMap;
-    // Opt in to an SDK-owned request_capability tool that lets agents report
-    // a capability absent from the server's current tool set. Default false.
+    // SDK-owned request_capability tool that lets agents report a capability
+    // absent from the server's current tool set. On by default (when a
+    // delivery path is configured); set to false to disable.
     requestCapability?: boolean;
   };
 };

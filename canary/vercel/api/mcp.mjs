@@ -44,6 +44,9 @@ export default async function handler(req, res) {
       delivery: "await",
       timeoutMs: 10_000,
       actorId: "sdk-canary-browser-worker",
+      // The HTTP smoke test asserts an exact tool list; keep the on-by-default
+      // request_capability tool out of this fixture.
+      requestCapability: false,
     },
   }, () => {
     const server = new McpServer({ name: "sdk-canary-typescript", version: deployment });

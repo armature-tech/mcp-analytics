@@ -53,21 +53,31 @@ If they aren't, install them too. Use the customer's package manager (check for
 The package is published to the public npm registry — `npm install` works without any
 `.npmrc` configuration.
 
-## Step 3: Add the API key environment variable
+## Step 3: Add the regional environment variables
 
-The SDK needs one credential, plus an optional URL override:
+The SDK needs one credential and an endpoint that matches the account region:
 
 | Variable | What it is |
 | --- | --- |
 | `ANALYTICS_INGEST_API_KEY` | Your Armature API key (created in the dashboard). Identifies the MCP server and signs each batch. |
-| `ANALYTICS_INGEST_URL` | Optional. Defaults to the prod endpoint `https://app.armature.tech/api/mcp-analytics/ingest` (SDK ≥ 0.4.2). Override for a local mock or staging environment. On 0.4.1 and earlier the default was `http://127.0.0.1:8787/...` — if the customer is pinned to one of those, set this var explicitly in prod or telemetry silently goes nowhere. |
+| `ANALYTICS_INGEST_URL` | Optional only for US, which defaults to `https://app.armature.tech/api/mcp-analytics/ingest`. Required for EU and must be `https://eu.armature.tech/api/mcp-analytics/ingest`. It may also target a local mock or staging environment. |
 
-Add `ANALYTICS_INGEST_API_KEY` to whatever env mechanism the project uses (`.env.example`,
-`wrangler.toml`, `vercel.json`, fly secrets, k8s manifests). Do **not** commit real values;
-put a placeholder in `.env.example` and tell the user where to paste the real one.
+Add `ANALYTICS_INGEST_API_KEY` and the region-appropriate
+`ANALYTICS_INGEST_URL` to whatever env mechanism the project uses
+(`.env.example`, `wrangler.toml`, `vercel.json`, fly secrets, k8s manifests).
+When the Armature dashboard supplies a copied two-line configuration, preserve
+both lines; never discard the URL for an EU account. Do **not** commit real
+values; put placeholders in `.env.example` and tell the user where to paste the
+real values. A hand-authored US configuration may omit the URL because the SDK
+defaults to the US endpoint, but keeping it explicit is recommended.
 
 If `ANALYTICS_INGEST_API_KEY` is missing at runtime, the SDK silently no-ops. That's intentional
 for local dev — say so once, don't add guards.
+
+The network emitter uses a 5-second timeout per attempt and at most two
+attempts, separated by 100 ms. It retries only network failures, timeouts,
+`429`, and `5xx`; other `4xx` responses are returned once as a structured
+`IngestDeliveryError` through `onError` without breaking the host application.
 
 ## Step 4: Pick a delivery mode
 
@@ -110,6 +120,7 @@ const server = createMcpAnalyticsServer(
     armature: {
       // endpointUrl / apiKey default to env vars
       delivery: "await", // or "background" — see Step 4
+      // request_capability is on by default; add `requestCapability: false` to disable (see Step 7).
     },
   },
 );
@@ -402,7 +413,8 @@ npx @armature-tech/mcp-analytics doctor --url http://localhost:3000/mcp
 Run it with the same `ANALYTICS_INGEST_API_KEY` and
 `ANALYTICS_INGEST_URL` environment as the server. It verifies the MCP
 handshake, every served tool's public wrapping contract, and ingest auth using
-an empty content-free batch. Use `--skip-ingest` only when the user explicitly
+an empty content-free batch. It also rejects a marked key whose region does
+not match the ingest or MCP URL without sending the key. Use `--skip-ingest` only when the user explicitly
 wants an offline check. Include the doctor result in the handoff.
 
 **Check 1 — Schema includes telemetry.** Spin up the server, ask it for `tools/list`, and
@@ -437,9 +449,14 @@ Tell the user, briefly:
 
 - `delivery: "background"` drops batches in serverless. You picked `"await"` (or not — say which).
 - The SDK no-ops silently if `ANALYTICS_INGEST_API_KEY` is missing. Set it in prod.
+- Confirm where both regional environment variables are configured; the URL is required for EU.
+- The SDK adds a `request_capability` tool (on by default) so the agent can report a capability the
+  current tools can't satisfy — this is what surfaces "unmet demand" use cases in Armature.
+  It's recommended, so leave it on. Briefly tell the user it's enabled and offer to turn it off:
+  set `requestCapability: false` in the `armature` config if they'd rather not expose it.
 
-Don't pad with anything else. End with one line: what you changed and what the user needs
-to do (paste the API key, deploy).
+Don't pad with anything else. End with one line: what you changed and what the
+user needs to do (paste the generated key and regional URL, deploy).
 
 ## What NOT to do
 

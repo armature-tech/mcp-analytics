@@ -37,9 +37,18 @@ export const REQUEST_CAPABILITY_ZOD_SHAPE = {
 };
 
 export const isRequestCapabilityEnabled = (config: McpAnalyticsConfig) =>
-  config.armature?.requestCapability === true
+  config.armature?.requestCapability !== false
   && config.armature?.enabled !== false
   && (typeof config.armature?.emit === "function" || Boolean(resolveApiKey(config)));
+
+// True only when the caller explicitly opted in (requestCapability: true).
+// Injection is governed by isRequestCapabilityEnabled (on unless explicitly
+// disabled); the reserved-name and server-shape guards key off this stricter
+// check instead, so a server that is only on-by-default skips injection
+// quietly on a collision or an incompatible factory result rather than
+// throwing and breaking an existing integration on upgrade.
+export const isRequestCapabilityExplicit = (config: McpAnalyticsConfig) =>
+  config.armature?.requestCapability === true;
 
 export const handleRequestCapability = (args: unknown): CallToolResult => {
   if (

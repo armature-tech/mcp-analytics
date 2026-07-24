@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### `request_capability` is on by default
+
+The SDK-owned `request_capability` tool now defaults to **on** whenever a
+delivery path (`apiKey` or a custom `emit`) is configured, so agents can report
+capabilities the current tools can't satisfy and feed Armature's unmet-demand
+use cases out of the box. Set `requestCapability: false` to opt out; behavior is
+unchanged when analytics is disabled or no delivery path exists. The reserved
+tool-name guard now only errors when you explicitly pass `requestCapability:
+true`; when the tool is on merely by default, a customer tool of the same name
+(or a factory that doesn't return an `McpServer`) makes the SDK skip its own
+injection silently instead of throwing on upgrade.
+
+The Mastra wrappers (`wrapMastraTools`, `wrapMastraToolsWithRecorder`,
+`createMastraAnalytics().wrapTools`) now return `WithRequestCapability<T>` (`T`
+plus an optional `request_capability` key) instead of `T`, so the injected tool
+is reflected in the type. `T & Partial<…>` stays assignable to `T`, so existing
+callers are unaffected.
+
 ### Caller-supplied request ids are scoped by session (no more silent event loss)
 
 A `requestId` seeds the tool-call `event_id`, which ingest de-dups on. A caller

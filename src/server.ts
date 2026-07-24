@@ -15,7 +15,7 @@ import { planToolTelemetry } from "./schema.js";
 import type { TelemetryMode } from "./types.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
 import { deriveToolResultError, isRecord } from "./utils.js";
-import { isRequestCapabilityEnabled } from "./request-capability.js";
+import { isRequestCapabilityEnabled, isRequestCapabilityExplicit } from "./request-capability.js";
 
 type WithAnalyticsContext = {
   config: McpAnalyticsConfig;
@@ -235,21 +235,29 @@ export const withMcpAnalytics = <ServerFactoryResult>(
   // registers it once without adding telemetry fields or mutating its exact
   // description.
   if (isRequestCapabilityEnabled(config) && !(result instanceof McpServer)) {
-    throw new Error(
-      "armature.requestCapability requires the server factory to return an McpServer instance.",
-    );
+    // Only a hard error when the caller explicitly opted in. A server that is
+    // request_capability-on merely by default and doesn't return an McpServer
+    // silently skips injection instead of breaking on upgrade.
+    if (isRequestCapabilityExplicit(config)) {
+      throw new Error(
+        "armature.requestCapability requires the server factory to return an McpServer instance.",
+      );
+    }
   }
   if (isRequestCapabilityEnabled(config) && result instanceof McpServer) {
     try {
       recorder.attachToMcpServer(result);
     } catch (error) {
-      if (error instanceof Error && /already registered/i.test(error.message)) {
+      const collision = error instanceof Error && /already registered/i.test(error.message);
+      // A pre-existing tool of the same name is reserved only when the caller
+      // explicitly opted in; on-by-default yields to the customer's tool.
+      if (collision && isRequestCapabilityExplicit(config)) {
         throw new Error(
           'Tool name "request_capability" is reserved while armature.requestCapability is enabled.',
           { cause: error },
         );
       }
-      throw error;
+      if (!collision) throw error;
     }
   }
   return { result, recorder };

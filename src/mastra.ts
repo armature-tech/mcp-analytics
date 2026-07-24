@@ -11,7 +11,7 @@ import type {
 import { isRecord } from "./utils.js";
 import { z } from "zod";
 import {
-  isRequestCapabilityEnabled,
+  isRequestCapabilityExplicit,
   REQUEST_CAPABILITY_ARGUMENT_DESCRIPTION,
   REQUEST_CAPABILITY_DESCRIPTION,
   REQUEST_CAPABILITY_TOOL_NAME,
@@ -52,6 +52,13 @@ export type MastraTool = {
 };
 
 export type MastraToolMap = Record<string, MastraTool>;
+
+// The wrapped map may carry the SDK-owned request_capability tool, which is not
+// part of the caller's T. Reflect it as an optional extra key so the return type
+// is honest — callers keep their exact T members plus an optional
+// request_capability, without needing a cast to read it.
+export type WithRequestCapability<T> =
+  T & Partial<Record<typeof REQUEST_CAPABILITY_TOOL_NAME, MastraTool>>;
 
 export type MastraAdapterOptions = McpAnalyticsConfig & {
   resolveExtra?: (mastraContext: unknown) => RequestExtra | undefined;
@@ -220,21 +227,22 @@ export const wrapMastraToolsWithRecorder = <T extends MastraToolMap>(
   recorder: AnalyticsRecorder,
   config: InternalMcpAnalyticsConfig = {},
   options: { resolveExtra?: MastraAdapterOptions["resolveExtra"] } = {},
-): T => {
+): WithRequestCapability<T> => {
   const out: MastraToolMap = {};
-  const requestCapabilityEnabled = isRequestCapabilityEnabled(config);
-  if (requestCapabilityEnabled !== recorder.hasTool(REQUEST_CAPABILITY_TOOL_NAME)) {
-    throw new Error(
-      "request_capability configuration does not match the supplied analytics recorder.",
-    );
-  }
-  if (
-    requestCapabilityEnabled
+  // The recorder is the source of truth for whether request_capability exists:
+  // the high-level wrapMastraTools builds it from the same config, and direct
+  // callers may pass a lean wrap-time config that omits the delivery sink. Now
+  // that the tool is on by default, re-deriving enablement from that lean
+  // config would spuriously disagree with a recorder that has it.
+  const requestCapabilityEnabled = recorder.hasTool(REQUEST_CAPABILITY_TOOL_NAME);
+  const requestCapabilityCollision = requestCapabilityEnabled
     && Object.entries(tools).some(
       ([key, tool]) => key === REQUEST_CAPABILITY_TOOL_NAME
         || tool.id === REQUEST_CAPABILITY_TOOL_NAME,
-    )
-  ) {
+    );
+  // A customer tool of the same name is reserved only when the caller
+  // explicitly opted in; when on by default it wins and the SDK skips its own.
+  if (requestCapabilityCollision && isRequestCapabilityExplicit(config)) {
     throw new Error(
       `Tool name "${REQUEST_CAPABILITY_TOOL_NAME}" is reserved while armature.requestCapability is enabled.`,
     );
@@ -242,7 +250,7 @@ export const wrapMastraToolsWithRecorder = <T extends MastraToolMap>(
   for (const [key, tool] of Object.entries(tools)) {
     out[key] = wrapOneTool(key, tool, recorder, config, options.resolveExtra);
   }
-  if (requestCapabilityEnabled) {
+  if (requestCapabilityEnabled && !requestCapabilityCollision) {
     out[REQUEST_CAPABILITY_TOOL_NAME] = {
       id: REQUEST_CAPABILITY_TOOL_NAME,
       description: REQUEST_CAPABILITY_DESCRIPTION,
@@ -280,13 +288,13 @@ export const wrapMastraToolsWithRecorder = <T extends MastraToolMap>(
       },
     };
   }
-  return out as T;
+  return out as WithRequestCapability<T>;
 };
 
 export const wrapMastraTools = <T extends MastraToolMap>(
   tools: T,
   options: MastraAdapterOptions = {},
-): T => {
+): WithRequestCapability<T> => {
   const { resolveExtra, ...config } = options;
   const recorder = createAnalyticsRecorder(config);
   return wrapMastraToolsWithRecorder(tools, recorder, config, { resolveExtra });
@@ -294,7 +302,7 @@ export const wrapMastraTools = <T extends MastraToolMap>(
 
 export type MastraAnalytics = {
   recorder: AnalyticsRecorder;
-  wrapTools: <T extends MastraToolMap>(tools: T) => T;
+  wrapTools: <T extends MastraToolMap>(tools: T) => WithRequestCapability<T>;
   flush: () => Promise<void>;
 };
 

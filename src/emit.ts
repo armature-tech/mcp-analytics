@@ -9,9 +9,55 @@ export const defaultMcpAnalyticsConfig = {
   armature: {
     endpointUrl: "https://app.armature.tech/api/mcp-analytics/ingest",
     enabled: true,
-    timeoutMs: 500,
+    timeoutMs: 5_000,
   },
 } satisfies McpAnalyticsConfig;
+
+export const DEFAULT_INGEST_MAX_ATTEMPTS = 2;
+export const DEFAULT_INGEST_RETRY_DELAY_MS = 100;
+
+export class IngestDeliveryError extends Error {
+  readonly code: string;
+  readonly status?: number;
+  readonly retryable: boolean;
+  readonly attempts: number;
+
+  constructor(message: string, options: {
+    code: string;
+    status?: number;
+    retryable?: boolean;
+    attempts: number;
+    cause?: unknown;
+  }) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "IngestDeliveryError";
+    this.code = options.code;
+    this.status = options.status;
+    this.retryable = options.retryable === true;
+    this.attempts = options.attempts;
+  }
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const responseErrorCode = async (response: Response): Promise<string> => {
+  const fallback = `ingest_http_${response.status}`;
+  const text = (await response.text()).slice(0, 4_096);
+  try {
+    const payload = JSON.parse(text) as {
+      error?: { code?: unknown };
+      errorCode?: unknown;
+    };
+    const candidate = typeof payload.error?.code === "string"
+      ? payload.error.code
+      : typeof payload.errorCode === "string"
+        ? payload.errorCode
+        : fallback;
+    return /^[a-z0-9][a-z0-9_:-]{0,99}$/i.test(candidate) ? candidate : fallback;
+  } catch {
+    return fallback;
+  }
+};
 
 export const resolveEndpointUrl = (config: McpAnalyticsConfig) => {
   return config.armature?.endpointUrl ??
@@ -67,6 +113,7 @@ export type IngestResult = {
   ok?: boolean;
   reason?: string;
   status?: number;
+  attempts?: number;
   accepted?: number;
   rejected?: IngestRejection[];
   duplicateCount?: number;
@@ -121,49 +168,82 @@ export const postTelemetryEvent = async (
   }
 
   const body = JSON.stringify(batch);
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    config.armature?.timeoutMs ?? defaultMcpAnalyticsConfig.armature.timeoutMs,
-  );
+  const timeoutMs = config.armature?.timeoutMs ?? defaultMcpAnalyticsConfig.armature.timeoutMs;
 
-  try {
-    const response = await fetch(endpointUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body,
-      signal: controller.signal,
-    });
-
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`Armature ingest failed with ${response.status}: ${text}`);
-    }
-
-    // The body carries in-band rejection/dedup even on 200; parse it so the
-    // emit path can raise on refused events (#1403). A non-JSON body just
-    // means we cannot observe rejections, not a delivery failure.
-    let parsed: Record<string, unknown> = {};
+  for (let attempt = 1; attempt <= DEFAULT_INGEST_MAX_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-    } catch {
-      parsed = {};
+      const response = await fetch(endpointUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const retryable = response.status === 429 || response.status >= 500;
+        const code = await responseErrorCode(response);
+        if (retryable && attempt < DEFAULT_INGEST_MAX_ATTEMPTS) {
+          await sleep(DEFAULT_INGEST_RETRY_DELAY_MS);
+          continue;
+        }
+        throw new IngestDeliveryError(
+          `Armature ingest failed with HTTP ${response.status} (${code})`,
+          { code, status: response.status, retryable, attempts: attempt },
+        );
+      }
+
+      const text = await response.text();
+      // Ingest can report in-band rejection/dedup on a successful status. A
+      // non-JSON body means rejections are unobservable, not that delivery
+      // failed.
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+      } catch {
+        parsed = {};
+      }
+      return {
+        skipped: false,
+        ok: true,
+        status: response.status,
+        attempts: attempt,
+        accepted: typeof parsed.accepted === "number" ? parsed.accepted : undefined,
+        rejected: Array.isArray(parsed.rejected) ? (parsed.rejected as IngestRejection[]) : [],
+        duplicateCount:
+          typeof parsed.duplicate_count === "number" ? parsed.duplicate_count : undefined,
+      };
+    } catch (error) {
+      if (error instanceof IngestDeliveryError) throw error;
+      const timedOut = (error as { name?: string } | null)?.name === "AbortError";
+      if (attempt < DEFAULT_INGEST_MAX_ATTEMPTS) {
+        await sleep(DEFAULT_INGEST_RETRY_DELAY_MS);
+        continue;
+      }
+      throw new IngestDeliveryError(
+        timedOut
+          ? `Armature ingest timed out after ${timeoutMs}ms`
+          : "Armature ingest connection failed",
+        {
+          code: timedOut ? "ingest_timeout" : "ingest_connection_failed",
+          retryable: true,
+          attempts: attempt,
+          cause: error,
+        },
+      );
+    } finally {
+      clearTimeout(timeout);
     }
-    return {
-      skipped: false,
-      ok: true,
-      status: response.status,
-      accepted: typeof parsed.accepted === "number" ? parsed.accepted : undefined,
-      rejected: Array.isArray(parsed.rejected) ? (parsed.rejected as IngestRejection[]) : [],
-      duplicateCount:
-        typeof parsed.duplicate_count === "number" ? parsed.duplicate_count : undefined,
-    };
-  } finally {
-    clearTimeout(timeout);
   }
+
+  throw new IngestDeliveryError("Armature ingest delivery failed", {
+    code: "ingest_delivery_failed",
+    attempts: DEFAULT_INGEST_MAX_ATTEMPTS,
+  });
 };
 
 // The default network emit for every delivery path (privacy queue, flushable

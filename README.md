@@ -20,13 +20,25 @@ MCP SDK 1.29 or newer is required when your tools use Zod 4 raw-shape
 schemas. MCP SDK 1.20 accepts the package but silently drops fields from those
 schemas, including Armature's telemetry field.
 
-### 2. Add your ingest key
+### 2. Add your regional ingest configuration
 
-Create a server in the [Armature dashboard](https://app.armature.tech), copy its ingest key, and add it to your environment:
+Create a server in the Armature dashboard for your account's region, then copy
+**both** generated environment variables into your server environment:
 
 ~~~bash
 export ANALYTICS_INGEST_API_KEY="..."
+export ANALYTICS_INGEST_URL="https://app.armature.tech/api/mcp-analytics/ingest" # US
 ~~~
+
+For an EU account, `ANALYTICS_INGEST_URL` is required and must be:
+
+~~~bash
+export ANALYTICS_INGEST_URL="https://eu.armature.tech/api/mcp-analytics/ingest"
+~~~
+
+The URL may be omitted only for US accounts because the SDK defaults to the US
+endpoint. Keeping the generated URL explicit is recommended and makes the
+deployment region unambiguous.
 
 ### Verify the installation locally
 
@@ -47,7 +59,8 @@ every tool exposes Armature's telemetry contract, and checks the existing
 `ANALYTICS_INGEST_API_KEY` with an empty authenticated batch. The probe creates
 no session and sends no tool arguments, responses, or user content. Add
 `--skip-ingest` for a fully offline check, or `--json` for a support-ready
-machine-readable report.
+machine-readable report. It also compares marked `ami_us_` / `ami_eu_` keys
+with the ingest and MCP URLs, and will not send the probe when they disagree.
 
 ### 3. Instrument your MCP server
 
@@ -208,7 +221,9 @@ The full integration playbook is in [SKILL.md](SKILL.md).
 
 ## Configuration
 
-Most servers only need **ANALYTICS_INGEST_API_KEY**. Operational controls are available when you need them:
+Every server needs **ANALYTICS_INGEST_API_KEY**. EU servers must also set
+**ANALYTICS_INGEST_URL**; US servers may rely on the US default. Operational
+controls are available when you need them:
 
 ~~~ts
 type McpAnalyticsConfig = {
@@ -235,13 +250,13 @@ type McpAnalyticsConfig = {
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| **endpointUrl** | Armature cloud | Override the ingestion endpoint |
+| **endpointUrl** | US Armature cloud | Override the ingestion endpoint; use `https://eu.armature.tech/api/mcp-analytics/ingest` for EU |
 | **apiKey** | **ANALYTICS_INGEST_API_KEY** | Authenticate events and identify the MCP server |
 | **actorId** | Derived from request auth | Supply a stable user or tenant seed |
 | **actorIdentifier** | None | Store a caller-provided identifier verbatim |
 | **enabled** | **true** | Enable or disable instrumentation |
 | **delivery** | **"background"** | Use **"await"** for serverless or short-lived processes |
-| **timeoutMs** | **500** | Set the delivery timeout |
+| **timeoutMs** | **5000** | Set the timeout for each delivery attempt |
 | **emit** | Network emitter | Replace delivery for tests or custom pipelines |
 | **onError** | None | Observe delivery failures |
 | **captureTelemetry** | **true** | Disable conversation-derived telemetry entirely (see below) |
@@ -250,21 +265,28 @@ type McpAnalyticsConfig = {
 | **redactEvent** | None | Mutate or drop the prepared whole tool-call event |
 | **schedule** | None | Register background work with a serverless lifecycle primitive |
 | **telemetryFieldMap** | None | Export existing argument fields as telemetry (see below) |
-| **requestCapability** | **false** | Inject `request_capability` so agents can report an unmet tool need |
+| **requestCapability** | **true** | Inject `request_capability` so agents can report an unmet tool need; set `false` to disable |
+
+Network failures, timeouts, `429`, and `5xx` responses are retried once after
+100 ms (two attempts total). Other `4xx` responses are not retried.
+`IngestDeliveryError` exposes a payload-free `code`, `status`, `retryable`, and
+`attempts` through `onError`; telemetry delivery remains fail-open by default.
 
 ### Capability requests
 
-Set **requestCapability: true** to add an SDK-owned `request_capability` tool
-to the advertised tool list. The tool accepts one required `capability` string
-and uses this description exactly:
+The SDK-owned `request_capability` tool is added to the advertised tool list by
+default. The tool accepts one required `capability` string and uses this
+description exactly:
 
 > Request a capability that is not provided by the currently available tools. Use this when a capability is required to complete the user’s request and no existing tool can perform it.
 
 Calls are recorded through the normal analytics pipeline and feed Armature's
-unmet-demand signals. The option is off by default and is also suppressed when
-**enabled: false** or no API key/custom **emit** delivery is configured. While
-active, `request_capability` is reserved; rename a
-customer-defined tool with the same name before enabling it.
+unmet-demand signals. Set **requestCapability: false** to disable it. It is also
+suppressed when **enabled: false** or no API key/custom **emit** delivery is
+configured. When you explicitly set **requestCapability: true**, the name is
+reserved: rename a customer-defined tool with the same name first. When it is on
+merely by default, a customer tool of the same name takes precedence and the SDK
+skips its own injection instead of failing.
 
 ```mermaid
 sequenceDiagram
@@ -346,7 +368,7 @@ non-empty string no larger than 8 KiB. When **actorIdentifier** is absent,
 | Variable | Purpose |
 | --- | --- |
 | **ANALYTICS_INGEST_API_KEY** | Armature ingest key |
-| **ANALYTICS_INGEST_URL** | Optional ingestion endpoint override |
+| **ANALYTICS_INGEST_URL** | Optional only for US, which defaults to `https://app.armature.tech/api/mcp-analytics/ingest`. Required for EU and must be `https://eu.armature.tech/api/mcp-analytics/ingest`. Preserve this variable when copying dashboard configuration. |
 
 ## Example
 
@@ -355,7 +377,9 @@ Run the complete stdio server in [examples/minimal](examples/minimal):
 ~~~bash
 cd examples/minimal
 npm install
-ANALYTICS_INGEST_API_KEY="..." npm start
+ANALYTICS_INGEST_API_KEY="..." \
+ANALYTICS_INGEST_URL="https://app.armature.tech/api/mcp-analytics/ingest" \
+npm start
 ~~~
 
 ## Support

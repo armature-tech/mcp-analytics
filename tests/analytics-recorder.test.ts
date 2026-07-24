@@ -541,6 +541,7 @@ test("recorder.tool registers a handler that dispatches with stripped args and r
   const recorder = createAnalyticsRecorder({
     armature: {
       delivery: "await",
+      requestCapability: false,
       actorId: "registry-actor",
       emit: (batch) => {
         batches.push(batch);
@@ -780,6 +781,7 @@ test("recorder.createMcpServer round-trips a tool call through real MCP transpor
   const recorder = createAnalyticsRecorder({
     armature: {
       delivery: "await",
+      requestCapability: false,
       actorId: "mcp-actor",
       emit: (batch) => {
         batches.push(batch);
@@ -846,6 +848,7 @@ test("recorder preserves customer outputSchema and annotations on the McpServer 
   const recorder = createAnalyticsRecorder({
     armature: {
       delivery: "await",
+      requestCapability: false,
       actorId: "mcp-actor",
       emit: () => {},
     },
@@ -931,6 +934,7 @@ test("recorder.tool registered after attachToMcpServer still reaches the attache
   const recorder = createAnalyticsRecorder({
     armature: {
       delivery: "await",
+      requestCapability: false,
       actorId: "late-attach-actor",
       emit: (batch) => {
         batches.push(batch);

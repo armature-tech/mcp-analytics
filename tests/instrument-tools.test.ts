@@ -50,7 +50,7 @@ test("instrumentMcpServerTools registers tools on a caller-owned McpServer end-t
     server: baseServer,
     tools,
     config: {
-      armature: { delivery: "await", actorId: "instrument-actor", emit },
+      armature: { delivery: "await", requestCapability: false, actorId: "instrument-actor", emit },
     },
   });
 
@@ -149,7 +149,7 @@ test("instrumentMcpServerTools applies a mapTool to translate a custom registry 
     server: baseServer,
     tools: appRegistry,
     config: {
-      armature: { delivery: "await", actorId: "mapper-actor", emit },
+      armature: { delivery: "await", requestCapability: false, actorId: "mapper-actor", emit },
     },
     mapTool: (def, key) => ({
       name: def.name ?? key ?? "anonymous",
@@ -211,7 +211,7 @@ test("instrumentMcpServerTools accepts an array of tools without a mapper", asyn
           okText(`b:${(args as { y: string }).y}`),
       },
     ] as InstrumentedTool[],
-    config: { armature: { delivery: "await", actorId: "array-actor", emit } },
+    config: { armature: { delivery: "await", requestCapability: false, actorId: "array-actor", emit } },
   });
 
   const client = new Client({ name: "array-client", version: "0.0.1" });

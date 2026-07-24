@@ -99,7 +99,7 @@ test("withMcpAnalytics instruments the deprecated server.tool(...) overload (PRI
 
   const { result: server, recorder } = withMcpAnalytics(
     {
-      armature: { delivery: "await", actorId: "tool-overload-actor", emit },
+      armature: { delivery: "await", requestCapability: false, actorId: "tool-overload-actor", emit },
     },
     () => {
       const s = new McpServer({ name: "tool-overload-server", version: "0.0.1" });

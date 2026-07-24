@@ -49,6 +49,7 @@ import { parseStatelessSessionClientInfo } from "./stateless-http.js";
 import {
   handleRequestCapability,
   isRequestCapabilityEnabled,
+  isRequestCapabilityExplicit,
   REQUEST_CAPABILITY_DESCRIPTION,
   REQUEST_CAPABILITY_INPUT_SCHEMA,
   REQUEST_CAPABILITY_TOOL_NAME,
@@ -495,7 +496,11 @@ export const createAnalyticsRecorder = (
     if (
       isRequestCapabilityEnabled(config)
       && registration.name === REQUEST_CAPABILITY_TOOL_NAME
+      && isRequestCapabilityExplicit(config)
     ) {
+      // Reserved only when the caller explicitly opted in. When the tool is on
+      // merely by default, a customer tool of the same name takes precedence:
+      // fall through so this registration overwrites the SDK-owned entry.
       throw new Error(
         `Tool name "${REQUEST_CAPABILITY_TOOL_NAME}" is reserved while armature.requestCapability is enabled.`,
       );
