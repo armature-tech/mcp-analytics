@@ -75,7 +75,8 @@
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:markers": "node -e \"require('fs').writeFileSync('dist/esm/package.json', '{\\\"type\\\":\\\"module\\\"}\\n'); require('fs').writeFileSync('dist/cjs/package.json', '{\\\"type\\\":\\\"commonjs\\\"}\\n')\"",
-    "build": "npm run clean && npm run build:esm && npm run build:cjs && npm run build:markers",
+    "build:version": "node scripts/stamp-version.mjs",
+    "build": "npm run clean && npm run build:esm && npm run build:cjs && npm run build:markers && npm run build:version",
     "prepublishOnly": "npm run check && npm run build"
   },
   "publishConfig": {

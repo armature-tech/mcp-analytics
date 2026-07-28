@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SDK_IDENTITY, SDK_USER_AGENT } from "./emit.js";
 import {
   REQUEST_CAPABILITY_DESCRIPTION,
   REQUEST_CAPABILITY_TOOL_NAME,
@@ -380,8 +381,9 @@ export const verifyIngest = async (
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${apiKey}`,
+        "user-agent": SDK_USER_AGENT,
       },
-      body: JSON.stringify({ schema_version: 1, events: [] }),
+      body: JSON.stringify({ schema_version: 1, events: [], sdk: SDK_IDENTITY }),
       signal: controller.signal,
     });
     // Read the body so undici can release its pooled connection promptly (the

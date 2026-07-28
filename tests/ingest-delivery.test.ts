@@ -4,7 +4,10 @@ import {
   defaultMcpAnalyticsConfig,
   IngestDeliveryError,
   postTelemetryEvent,
+  SDK_IDENTITY,
+  SDK_USER_AGENT,
 } from "../src/emit.js";
+import { SDK_VERSION } from "../src/version.js";
 
 const batch = { schema_version: 1 as const, events: [] };
 const config = {
@@ -16,6 +19,31 @@ const config = {
 
 test("ingest delivery uses a five-second per-attempt timeout", () => {
   assert.equal(defaultMcpAnalyticsConfig.armature.timeoutMs, 5_000);
+});
+
+test("ingest delivery stamps the SDK identity and a versioned User-Agent", async () => {
+  const originalFetch = globalThis.fetch;
+  let seenBody: string | undefined;
+  let seenUserAgent: string | null | undefined;
+  globalThis.fetch = async (_url, init) => {
+    seenBody = String(init?.body);
+    seenUserAgent = new Headers(init?.headers).get("user-agent");
+    return new Response('{"accepted":0,"rejected":[],"duplicate_count":0}', { status: 200 });
+  };
+  try {
+    await postTelemetryEvent(batch, config);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const parsed = JSON.parse(seenBody ?? "{}");
+  assert.deepEqual(parsed.sdk, { language: "typescript", version: SDK_VERSION });
+  // The version must come from the package build, never a hardcoded string:
+  // source checkouts report the development placeholder, published builds the
+  // stamped release semver.
+  assert.match(SDK_VERSION, /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
+  assert.equal(seenUserAgent, SDK_USER_AGENT);
+  assert.equal(SDK_USER_AGENT, `armature-mcp-analytics-typescript/${SDK_VERSION}`);
+  assert.deepEqual(SDK_IDENTITY, { language: "typescript", version: SDK_VERSION });
 });
 
 test("ingest delivery retries a transient response once", async () => {

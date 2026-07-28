@@ -18,6 +18,7 @@ import {
   type DoctorTool,
 } from "../src/doctor.js";
 import { parseDoctorArguments } from "../src/doctor-args.js";
+import { SDK_VERSION } from "../src/version.js";
 import {
   REQUEST_CAPABILITY_DESCRIPTION,
   REQUEST_CAPABILITY_TOOL_NAME,
@@ -200,7 +201,12 @@ test("ingest probe sends only an empty authenticated batch", async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
   assert.equal(receivedAuthorization, "Bearer ami_test_secret");
-  assert.deepEqual(JSON.parse(receivedBody), { schema_version: 1, events: [] });
+  // The probe carries the SDK identity but still no tool or user content.
+  assert.deepEqual(JSON.parse(receivedBody), {
+    schema_version: 1,
+    events: [],
+    sdk: { language: "typescript", version: SDK_VERSION },
+  });
 });
 
 test("ingest probe consumes the response body", async () => {

@@ -1,9 +1,18 @@
 import type {
   ActorIdResolverInput,
+  AnalyticsBatchSdk,
   AnalyticsIngestBatch,
   McpAnalyticsConfig,
 } from "./types.js";
 import { headerValue, readEnv } from "./utils.js";
+import { SDK_VERSION } from "./version.js";
+
+export const SDK_IDENTITY: AnalyticsBatchSdk = {
+  language: "typescript",
+  version: SDK_VERSION,
+};
+
+export const SDK_USER_AGENT = `armature-mcp-analytics-typescript/${SDK_VERSION}`;
 
 export const defaultMcpAnalyticsConfig = {
   armature: {
@@ -167,7 +176,10 @@ export const postTelemetryEvent = async (
     return { skipped: true, reason: "ingest_config_missing" };
   }
 
-  const body = JSON.stringify(batch);
+  // Stamp the SDK identity at the delivery boundary so every batch that
+  // reaches Armature ingest carries it, regardless of which path built the
+  // batch (privacy queue, flushable emitter, one-shot emit).
+  const body = JSON.stringify(batch.sdk ? batch : { ...batch, sdk: SDK_IDENTITY });
   const timeoutMs = config.armature?.timeoutMs ?? defaultMcpAnalyticsConfig.armature.timeoutMs;
 
   for (let attempt = 1; attempt <= DEFAULT_INGEST_MAX_ATTEMPTS; attempt += 1) {
@@ -179,6 +191,7 @@ export const postTelemetryEvent = async (
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
+          "User-Agent": SDK_USER_AGENT,
         },
         body,
         signal: controller.signal,

@@ -320,9 +320,18 @@ export type AnalyticsIngestEvent = {
   workflow_run_id?: string;
 };
 
+// Which SDK produced the batch. Stamped once per batch at the delivery
+// boundary (postTelemetryEvent); ingest persists the last-seen value on the
+// mcp_servers row so support can tell what a customer runs.
+export type AnalyticsBatchSdk = {
+  language: string;
+  version: string;
+};
+
 export type AnalyticsIngestBatch = {
   schema_version: 1;
   events: AnalyticsIngestEvent[];
+  sdk?: AnalyticsBatchSdk;
 };
 
 export type TelemetryEmitter = (
