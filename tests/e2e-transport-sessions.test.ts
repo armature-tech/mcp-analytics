@@ -13,6 +13,7 @@ import {
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -149,8 +150,14 @@ const startInstrumentedHttpServer = async (
       const s = new McpServer({ name: "e2e-http-fixture", version: "0.0.1" });
       s.registerTool(
         "echo",
-        { description: "echo", inputSchema: { msg: z.string() } },
-        async ({ msg }) => ({ content: [{ type: "text" as const, text: msg }] }),
+        // Cast: dev-tree two-zod situation (SDK 1.26.0 binds AnySchema to the
+        // hoisted zod 4.x; this file imports zod 3.25.x). Runtime accepts v3.
+        { description: "echo", inputSchema: { msg: z.string() } as unknown as ZodRawShapeCompat },
+        async (args: unknown) => ({
+          content: [
+            { type: "text" as const, text: (args as { msg: string }).msg },
+          ],
+        }),
       );
       return s;
     },
@@ -276,8 +283,14 @@ const startStatelessHttpServer = async (
       const s = new McpServer({ name: "e2e-stateless-fixture", version: "0.0.1" });
       s.registerTool(
         "echo",
-        { description: "echo", inputSchema: { msg: z.string() } },
-        async ({ msg }) => ({ content: [{ type: "text" as const, text: msg }] }),
+        // Cast: dev-tree two-zod situation (SDK 1.26.0 binds AnySchema to the
+        // hoisted zod 4.x; this file imports zod 3.25.x). Runtime accepts v3.
+        { description: "echo", inputSchema: { msg: z.string() } as unknown as ZodRawShapeCompat },
+        async (args: unknown) => ({
+          content: [
+            { type: "text" as const, text: (args as { msg: string }).msg },
+          ],
+        }),
       );
       return s;
     }).result;

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { HeaderBag, JsonObjectSchema } from "./types.js";
+import type { HeaderBag, JsonObjectSchema, RequestExtra } from "./types.js";
 
 export const SCHEMA_VERSION = 1 as const;
 export const MAX_SOURCE_BYTES = 32 * 1024;
@@ -21,6 +21,39 @@ export const isRawShape = (value: unknown): value is Record<string, unknown> => 
     !("_zod" in value) &&
     !isJsonObjectSchema(value)
   );
+};
+
+// Shallow-merge two RequestExtra values with the override winning per field;
+// `requestInfo` and `authInfo` merge one level deep so an override that only
+// sets headers doesn't wipe a base authInfo (and vice versa). Shared by the
+// framework adapters (Mastra, fastmcp) that layer a user-supplied
+// `resolveExtra` on top of the extra they derive from the framework context.
+export const mergeRequestExtra = (
+  base: RequestExtra | undefined,
+  override: RequestExtra | undefined,
+): RequestExtra | undefined => {
+  if (!base) return override;
+  if (!override) return base;
+  return {
+    ...base,
+    ...override,
+    ...(base.requestInfo || override.requestInfo
+      ? {
+          requestInfo: {
+            ...(base.requestInfo ?? {}),
+            ...(override.requestInfo ?? {}),
+          },
+        }
+      : {}),
+    ...(base.authInfo || override.authInfo
+      ? {
+          authInfo: {
+            ...(base.authInfo ?? {}),
+            ...(override.authInfo ?? {}),
+          },
+        }
+      : {}),
+  };
 };
 
 export const readEnv = (key: string) => {

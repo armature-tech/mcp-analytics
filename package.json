@@ -21,7 +21,9 @@
     "observability",
     "instrumentation",
     "armature",
-    "mastra"
+    "mastra",
+    "fastmcp",
+    "mcp-handler"
   ],
   "main": "./dist/cjs/index.js",
   "types": "./dist/cjs/index.d.ts",
@@ -47,6 +49,36 @@
       "require": {
         "types": "./dist/cjs/mastra.d.ts",
         "default": "./dist/cjs/mastra.js"
+      }
+    },
+    "./fastmcp": {
+      "import": {
+        "types": "./dist/esm/fastmcp.d.ts",
+        "default": "./dist/esm/fastmcp.js"
+      },
+      "require": {
+        "types": "./dist/cjs/fastmcp.d.ts",
+        "default": "./dist/cjs/fastmcp.js"
+      }
+    },
+    "./mcp-handler": {
+      "import": {
+        "types": "./dist/esm/mcp-handler.d.ts",
+        "default": "./dist/esm/mcp-handler.js"
+      },
+      "require": {
+        "types": "./dist/cjs/mcp-handler.d.ts",
+        "default": "./dist/cjs/mcp-handler.js"
+      }
+    },
+    "./v2": {
+      "import": {
+        "types": "./dist/esm/v2.d.ts",
+        "default": "./dist/esm/v2.js"
+      },
+      "require": {
+        "types": "./dist/cjs/v2.d.ts",
+        "default": "./dist/cjs/v2.js"
       }
     }
   },
@@ -87,11 +119,24 @@
     "zod": "^3.25.76"
   },
   "peerDependencies": {
-    "@modelcontextprotocol/sdk": "^1.20.0"
+    "@modelcontextprotocol/sdk": ">=1.20.0 <2",
+    "@modelcontextprotocol/server": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@modelcontextprotocol/sdk": {
+      "optional": true
+    },
+    "@modelcontextprotocol/server": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "1.20.0",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/sdk": "1.26.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "@types/node": "^22.10.2",
+    "fastmcp": "4.12.1",
+    "mcp-handler": "1.1.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

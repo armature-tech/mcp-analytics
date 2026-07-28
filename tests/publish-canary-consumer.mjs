@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -168,6 +169,62 @@ async function readback(shape, intent) {
   }
 }
 
+// ─── v2 subpath (@armature-tech/mcp-analytics/v2) ───────────────────────────
+// Loads under BOTH module systems from the packed artifact, and a real
+// modern-era (2026-07-28) conversation through createMcpHandler records
+// tool_call + session_init without touching the v1 SDK entry.
+async function v2Canary() {
+  const v2Esm = await import("@armature-tech/mcp-analytics/v2");
+  const v2Cjs = createRequire(import.meta.url)("@armature-tech/mcp-analytics/v2");
+  for (const api of [v2Esm, v2Cjs]) {
+    assert.equal(typeof api.withMcpAnalytics, "function");
+    assert.equal(typeof api.instrumentedFactory, "function");
+    assert.equal(typeof api.wrapMcpHandler, "function");
+    assert.equal(typeof api.flushMcpAnalytics, "function");
+  }
+
+  const { createMcpHandler, McpServer, fromJsonSchema } = await import("@modelcontextprotocol/server");
+  const { Client, StreamableHTTPClientTransport } = await import("@modelcontextprotocol/client");
+  const batches = [];
+  const v2Config = {
+    armature: { delivery: "await", actorId: "sdk-canary-shared-actor", emit: batch => { batches.push(batch); } },
+  };
+  const handler = v2Esm.wrapMcpHandler(
+    createMcpHandler(v2Esm.instrumentedFactory(() => {
+      const server = new McpServer({ name: "ts-canary-v2", version: "1" }, { capabilities: { tools: {} } });
+      server.registerTool(
+        "canary_echo",
+        { inputSchema: fromJsonSchema({ type: "object", properties: { marker: { type: "string" } } }) },
+        async args => ok(args.marker),
+      );
+      return server;
+    }, v2Config)),
+    v2Config,
+  );
+  const transport = new StreamableHTTPClientTransport(new URL("http://in-process.local/mcp"), {
+    fetch: (url, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set("x-armature-session-seed", randomUUID());
+      return handler.fetch(new Request(url, { ...init, headers }));
+    },
+  });
+  const client = new Client({ name: "sdk-publish-canary-v2", version: "1" }, { versionNegotiation: { mode: "auto" } });
+  await client.connect(transport);
+  try {
+    assert.equal(client.getProtocolEra(), "modern");
+    const result = await client.callTool({ name: "canary_echo", arguments: { marker: "v2/call-1" } });
+    assert.equal(result.content[0]?.text, "v2/call-1");
+  } finally {
+    await client.close();
+  }
+  const events = batches.flatMap(batch => batch.events);
+  const toolCall = events.find(event => event.kind === "tool_call");
+  assert.ok(toolCall, "v2 tool_call event missing");
+  assert.equal(toolCall.metadata.tool_name, "canary_echo");
+  assert.equal(toolCall.metadata.client_name, "sdk-publish-canary-v2");
+  assert.ok(events.some(event => event.kind === "session_init"), "v2 session_init missing");
+}
+
 try {
   for (const shape of Object.keys(factories)) {
     const intent = `sdk-canary/${packageName}/${candidate}/${shape}/${runId}`;
@@ -175,6 +232,8 @@ try {
     if (live) await readback(shape, intent);
     console.log(`ok ${shape}`);
   }
+  await v2Canary();
+  console.log("ok v2-subpath");
   if (!live) {
     const events = sinkRequests.flatMap(request => request.batch.events);
     assert.ok(events.length >= Object.keys(factories).length * 4);

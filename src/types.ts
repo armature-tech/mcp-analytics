@@ -213,6 +213,10 @@ export type RecordToolCallEvent = {
   workflowRunId?: string;
   // Internal provenance marker for the SDK-owned request_capability tool.
   capabilityRequest?: boolean;
+  // Extra metadata keys merged into the tool_call event's metadata object.
+  // Contract-defined keys always win on a collision (see events.ts). Used by
+  // the v2 adapter for per-request client identity and captured request _meta.
+  metadataExtra?: Record<string, unknown>;
 };
 
 export type InstrumentToolCallEvent = {
@@ -231,6 +235,14 @@ export type InstrumentToolCallEvent = {
   // prototype patch) pass the mode their planToolTelemetry call resolved.
   telemetryMode?: TelemetryMode;
   capabilityRequest?: boolean;
+  // See RecordToolCallEvent.metadataExtra.
+  metadataExtra?: Record<string, unknown>;
+  // Synchronous snapshot applied to a resolved tool result BEFORE it is handed
+  // to the (asynchronous) record pipeline, while the live object is returned
+  // to the caller untouched. The v2 SDK stamps io.modelcontextprotocol/serverInfo
+  // into the result's _meta AFTER the wrapped callback returns, so recording
+  // the live reference would capture a nondeterministically mutated envelope.
+  captureResult?: (result: unknown) => unknown;
 };
 
 export type ToolCallHandler<T> = (args: unknown) => T | Promise<T>;

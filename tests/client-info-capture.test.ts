@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import {
   __clearClientInfoCache,
@@ -57,7 +58,9 @@ test("Mastra-wrapped tool call picks up clientInfo cached from a real initialize
   // we don't actually call this tool in the test.
   server.registerTool(
     "noop",
-    { description: "noop", inputSchema: { x: z.string().optional() } },
+    // Cast: dev-tree two-zod situation (SDK 1.26.0 binds AnySchema to the
+    // hoisted zod 4.x; this file imports zod 3.25.x). Runtime accepts v3.
+    { description: "noop", inputSchema: { x: z.string().optional() } as unknown as ZodRawShapeCompat },
     async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
   );
 
@@ -264,7 +267,9 @@ test("stateless capture keys clientInfo by header even when transport.sessionId 
   const server = new McpServer({ name: "dual-key-server", version: "0.0.1" });
   server.registerTool(
     "noop",
-    { description: "noop", inputSchema: { x: z.string().optional() } },
+    // Cast: dev-tree two-zod situation (SDK 1.26.0 binds AnySchema to the
+    // hoisted zod 4.x; this file imports zod 3.25.x). Runtime accepts v3.
+    { description: "noop", inputSchema: { x: z.string().optional() } as unknown as ZodRawShapeCompat },
     async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
   );
 

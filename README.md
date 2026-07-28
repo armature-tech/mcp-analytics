@@ -123,7 +123,10 @@ All telemetry fields are optional. Send **agent_thinking** on every call; send *
 | Existing server and tool registry | **instrumentMcpServerTools(...)** |
 | Custom registry or JSON-RPC dispatcher | **createAnalyticsRecorder(...)** |
 | Mastra tool map | **wrapMastraTools(...)** |
+| fastmcp (`punkpeye/fastmcp`) server | **`@armature-tech/mcp-analytics/fastmcp`** — see [fastmcp](#fastmcp) |
+| Vercel **mcp-handler** route | **`@armature-tech/mcp-analytics/mcp-handler`** — see [Vercel mcp-handler](#vercel-mcp-handler) |
 | Stateless HTTP or serverless | **resolveStatelessHttpSession(...)** |
+| MCP SDK **v2** (`@modelcontextprotocol/server` 2.x) | **`@armature-tech/mcp-analytics/v2`** — see [MCP SDK v2](#mcp-sdk-v2-protocol-revision-2026-07-28) |
 
 ### Existing server and tool registry
 
@@ -178,6 +181,74 @@ const instrumentedTools = wrapMastraTools(tools, {
 });
 ~~~
 
+### fastmcp
+
+fastmcp (npm `fastmcp`) dispatches tool calls through its own low-level `Server` request handler, so the McpServer-based integrations above never see them. The dedicated subpath wraps the tool definition objects instead:
+
+~~~ts
+import { FastMCP } from "fastmcp";
+import {
+  instrumentFastMCP,
+  withFastmcpAnalytics,
+} from "@armature-tech/mcp-analytics/fastmcp";
+
+// Hoist the options object: the recorder (delivery queue + session dedupe)
+// is keyed on it.
+const analyticsOptions = { armature: { apiKey: process.env.ANALYTICS_INGEST_API_KEY } };
+
+const server = new FastMCP({ name: "my-server", version: "1.0.0" });
+
+// Either instrument the server (wraps every later addTool/addTools call and
+// sniffs the transport from server.start)…
+instrumentFastMCP(server, analyticsOptions);
+server.addTool({ name: "echo", parameters, execute });
+
+// …or wrap individual tool definitions:
+server.addTool(withFastmcpAnalytics({ name: "echo", parameters, execute }, analyticsOptions));
+
+await server.start({ transportType: "httpStream", httpStream: { port: 8080 } });
+~~~
+
+What is recorded: every tool call (timing, arguments/result previews, thrown errors **and** fastmcp `isError` results), plus one `session_init` per session with the client name/version fastmcp surfaces from the `initialize` handshake (`context.client.version`). The session id comes from `context.sessionId` (the `Mcp-Session-Id` on HTTP transports) or the process-scoped stdio id for stdio servers; `instrumentFastMCP` detects `httpStream` from `server.start` so anonymous HTTP sessions are never glued to one process id (pass `transport: "httpStream"` yourself when only using `withFastmcpAnalytics`).
+
+Honest limitations, dictated by what fastmcp exposes to `execute`:
+
+- **HTTP request headers are unreachable** from the execute context. To make header-based signals (`X-Armature-Session-Seed`, `X-Armature-Workflow-Run-Id`, an echoed `Mcp-Session-Id`) visible, have your `authenticate` copy them into the auth object — `authenticate: async (req) => ({ headers: req.headers })` — the adapter reads `context.session.headers`; `resolveExtra` covers anything else. Without that, those signals simply don't exist for a fastmcp server, and the adapter does not pretend otherwise.
+- **In fastmcp's stateless httpStream mode** each request builds a fresh session that never saw `initialize`, so the client is recorded as unknown — nothing in the execute context carries identity there.
+- **Tool schemas are not decorated** with the optional `telemetry` block (fastmcp validates opaque Standard Schema objects before `execute`, advertising `additionalProperties: false`), so agent-supplied conversation telemetry generally cannot arrive. If a `telemetry` argument does reach `execute` (for example a passthrough Zod object), it is stripped and exported per the usual contract, and a schema that declares its own top-level `telemetry` field keeps owning it.
+- `tool.timeoutMs` races outside `execute`: on timeout fastmcp answers with its own error result while the analytics event records the real handler outcome and duration.
+
+`flushFastmcpAnalytics(options)` drains the pipeline before shutdown when not using `delivery: "await"`.
+
+### Vercel mcp-handler
+
+Vercel's `mcp-handler` hands your initialize callback a real official-SDK `McpServer`, so the standard `withMcpAnalytics` wrapper covers its tool calls — run it inside the callback (which mcp-handler executes per request):
+
+~~~ts
+import { createMcpHandler } from "mcp-handler";
+import { withMcpAnalytics } from "@armature-tech/mcp-analytics";
+import { withMcpHandlerAnalytics } from "@armature-tech/mcp-analytics/mcp-handler";
+
+// Hoist the config; use "await" delivery (or schedule/waitUntil): the
+// callback runs per request and a background queue may be frozen.
+const analyticsConfig = { armature: { delivery: "await" as const } };
+
+const handler = withMcpHandlerAnalytics(
+  createMcpHandler((server) => {
+    withMcpAnalytics(analyticsConfig, () => {
+      server.registerTool(/* … */);
+      return server;
+    });
+  }),
+  analyticsConfig,
+);
+export { handler as GET, handler as POST };
+~~~
+
+Why the extra `withMcpHandlerAnalytics` wrapper: mcp-handler's streamable-HTTP transport is **stateless only** (its `sessionIdGenerator` config is typed `undefined`), so it never mints an `Mcp-Session-Id` and creates a throwaway `McpServer` per request — without the wrapper every tool call records with no session and an unknown client. The wrapper applies the v1 stateless pattern at the route handler: it sniffs `initialize` from the request body, mints an identity-bearing session id (`mcp_<name>_v_<version>_<uuid>`, honoring `X-Armature-Session-Seed`), records the `session_init` (client name/version/protocol/capabilities), and attaches the id as the response's `Mcp-Session-Id`. Conforming clients echo it on every later request, where tool calls pick it up and recover the client identity from the id itself — on any serverless instance, warm or cold. A client that never echoes the header still gets served; its calls simply keep a null session hint.
+
+Module-format caveat: the MCP SDK ships separate ESM and CJS builds. Transitive coverage of mcp-handler holds because both packages resolve the **same** build in any consistent host (pure ESM or pure CJS, verified in this repo's compat tests). A build setup that loads this package in one format and mcp-handler in the other would split the two `McpServer` classes and silently bypass the instrumentation — keep both on one module format.
+
 ### Stateless HTTP and serverless
 
 Initialization and tool calls can land on different instances in stateless deployments. **resolveStatelessHttpSession** preserves the MCP client and session identity without a session store:
@@ -204,6 +275,74 @@ await analytics.dispatch(name, args, {
 Use **delivery: "await"** in serverless and short-lived processes.
 
 Client attribution is best-effort observability, not a security boundary. Continue to gate access with real authentication.
+
+## MCP SDK v2 (protocol revision 2026-07-28)
+
+Servers on the v2 package family (`@modelcontextprotocol/server` 2.x) use the dedicated subpath — the package root still targets the v1 SDK, so a v2-only install imports **only** `@armature-tech/mcp-analytics/v2`:
+
+~~~ts
+import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
+import {
+  instrumentedFactory,
+  wrapMcpHandler,
+} from "@armature-tech/mcp-analytics/v2";
+
+// Hoist the config: the recorder (delivery queue + session_init dedupe) is
+// keyed on this object, so every per-request server shares one pipeline.
+const analyticsConfig = {
+  armature: { apiKey: process.env.ANALYTICS_INGEST_API_KEY },
+};
+
+const handler = wrapMcpHandler(
+  createMcpHandler(
+    instrumentedFactory(() => {
+      const server = new McpServer(
+        { name: "my-server", version: "1.0.0" },
+        { capabilities: { tools: {} } },
+      );
+      server.registerTool(/* … */);
+      return server;
+    }, analyticsConfig),
+  ),
+  analyticsConfig,
+);
+~~~
+
+- **`withMcpAnalytics(server, config?)`** wraps one v2 `McpServer` instance (tools registered before or after the call) and returns the same instance — handy when you construct the server yourself, e.g. under `serveStdio`.
+- **`instrumentedFactory(factory, config?)`** wraps a `createMcpHandler` / `serveStdio` factory. Because `createMcpHandler` runs the factory **per request**, this is the primary API: it shares one recorder across all produced servers and captures the factory's request context (headers, authInfo) as a fallback for handler contexts without an HTTP request.
+- **`wrapMcpHandler(handler, config?)`** is optional but strongly recommended: v2's `createMcpHandler` serves 2025-era clients through a stateless legacy leg that mints **no `Mcp-Session-Id`** — porting to SDK v2 **without this wrapper silently kills legacy-client sessions** (every legacy conversation loses its session identity and falls into per-actor daily buckets). The wrapper mints an identity-bearing id (`mcp_<name>_v_<version>_<uuid>`, honoring `X-Armature-Session-Seed` as the uuid seed) on legacy `initialize` responses, records the session, and echoes the id afterwards. Modern-era requests pass through untouched.
+- **`flushMcpAnalytics(config?)`** drains the pipeline tied to a config object; use it (or `delivery: "await"` / `schedule`) in serverless.
+
+What the v2 adapter records per request:
+
+- Client identity from the per-request `_meta` envelope (`io.modelcontextprotocol/clientInfo`, `protocolVersion`, `clientCapabilities`) — on `session_init` **and** on every `tool_call` (identity is per-request on 2026-07-28). `clientInfo` is optional in the final spec, so `client_name: null` on modern traffic is a legitimate steady state, not a bug.
+- The raw request `_meta` (W3C trace slots `traceparent` / `tracestate` / `baggage` keep their bare names there) as `metadata.request_meta`, capped at 4KB with a `request_meta_truncated` marker.
+- A session id resolved per request, in falling priority: `gen_ai.conversation.id` parsed from `_meta` baggage → `X-Armature-Session-Seed` header → legacy session identity (`ctx.sessionId`, then an echoed `Mcp-Session-Id` header) → the stdio process-scoped id when there is no HTTP context at all → none.
+
+Differences from the v1 integration: the v2 adapter does **not** decorate tool input schemas with the `telemetry` field (v2 schemas are opaque Standard Schema objects; rebuilding them with a foreign zod risks the SDK's silent `tools/list` conversion failure). A `telemetry` argument sent by a client is still stripped from the handler's arguments and exported, and a schema that declares its own top-level `telemetry` property keeps owning it (never stripped, never exported). Multi-round `input_required` flows record one `tool_call` per handler round.
+
+Both MCP SDK peers are optional: install `@modelcontextprotocol/sdk` (>=1.20 <2) for the package root, `@modelcontextprotocol/server` 2.x for `/v2`, or both.
+
+### v2 adapter options (`declareTelemetry`, `metadata`)
+
+`withMcpAnalytics(server, config?, options?)` and `instrumentedFactory(factory, config?, options?)` accept a third argument, `V2AdapterOptions`:
+
+~~~ts
+instrumentedFactory(buildServer, analyticsConfig, {
+  declareTelemetry: true,
+  metadata: (ctx) => ({ deployment: process.env.DEPLOY_ENV }),
+});
+~~~
+
+**`declareTelemetry: true`** restores v1 parity for telemetry schema advertisement (superseding the default no-decoration behavior described above): each instrumented tool's **advertised** input schema gains the optional `telemetry` property (byte-identical descriptions to the v1 integration) and the same description nudge, so fresh-schema v2 clients are told to send `telemetry.user_intent` / `telemetry.agent_thinking`. Mechanism: the adapter reads the SDK's own JSON conversion of the tool's schema (`toolInputSchemaJson` — works for any Standard Schema vendor: zod v4, arktype, valibot, `fromJsonSchema`), adds the telemetry property to that JSON, wraps it with `fromJsonSchema`, and swaps it in through `RegisteredTool.update({ paramsSchema })`. Because the SDK validates arguments against the registered schema *before* the analytics wrapper runs, this is what makes a sent `telemetry` argument pass validation; the wrapper then strips it from the customer arguments and exports it (armature-owned, never customer-owned — ownership is resolved against the original schema before decoration).
+
+- A top-level `additionalProperties: false` in your schema is preserved: `telemetry` becomes a *declared* property (so it validates), while every other undeclared key is still rejected exactly as before.
+- Tradeoff (why this is opt-in): validation then runs against the JSON Schema projection of your schema, via the SDK's Ajv validator. Zod runtime effects that don't survive that projection — `.transform()`, `.refine()`, applied `.default()` values — no longer run inside the SDK's validation step. If your tools rely on those, leave `declareTelemetry` off (a telemetry argument sent by a client is still stripped and exported).
+- Tools whose schema declares its own top-level `telemetry` property stay customer-owned and untouched; tools whose schema can't be projected to a JSON object schema are left undecorated; `captureTelemetry: false` disables decoration entirely.
+
+**`metadata(ctx)`** is a per-event metadata hook: it is called once per tool call with the handler context, and its returned keys are merged into the `tool_call` event's metadata (hook keys beat adapter-derived keys such as `protocol_era`; contract keys like `tool_name` always win). A throwing hook is ignored and never breaks the tool call.
+
+The v2 adapter also stamps on every `tool_call`: `protocol_era` (`"modern"` when the request carried a 2026-07-28 `_meta` envelope, `"legacy"` otherwise), the per-request `capabilities` (same 4KB cap as `session_init`), and `user_agent` (also on `session_init`). The captured `request_meta` runs through the same preview sanitization + secret redaction pipeline as tool inputs/results before the 4KB cap is applied. `wrapMcpHandler` forwards the `fetch(request, { authInfo })` options into `session_init` actor resolution, so custom `actorId` / `actorIdentifier` resolvers see the same `authInfo` shape as on tool calls.
 
 ## Let your coding agent install it
 

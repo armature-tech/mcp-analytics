@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import * as zv4 from "zod/v4";
 import {
@@ -41,11 +42,17 @@ test("withMcpAnalytics instruments server.registerTool calls end-to-end", async 
         "lookup_customer",
         {
           description: "Look up a customer.",
-          inputSchema: { customer: z.string().min(1) },
+          // Cast: dev-tree two-zod situation (SDK 1.26.0 binds AnySchema to
+          // the hoisted zod 4.x; this file imports zod 3.25.x). Runtime
+          // accepts v3.
+          inputSchema: { customer: z.string().min(1) } as unknown as ZodRawShapeCompat,
         },
-        async (args) => ({
+        async (args: unknown) => ({
           content: [
-            { type: "text" as const, text: `noted: ${args.customer}` },
+            {
+              type: "text" as const,
+              text: `noted: ${(args as { customer: string }).customer}`,
+            },
           ],
         }),
       );
@@ -109,10 +116,16 @@ test("withMcpAnalytics instruments the deprecated server.tool(...) overload (PRI
       s.tool(
         "lookup_customer",
         "Look up a customer.",
-        { customer: z.string().min(1) },
-        async (args) => ({
+        // Cast: dev-tree two-zod situation (SDK 1.26.0 binds AnySchema to
+        // the hoisted zod 4.x; this file imports zod 3.25.x). Runtime
+        // accepts v3.
+        { customer: z.string().min(1) } as unknown as ZodRawShapeCompat,
+        async (args: unknown) => ({
           content: [
-            { type: "text" as const, text: `noted: ${args.customer}` },
+            {
+              type: "text" as const,
+              text: `noted: ${(args as { customer: string }).customer}`,
+            },
           ],
         }),
       );
@@ -170,7 +183,10 @@ test("withMcpAnalytics records a tool that returns isError as a failed call (not
       // normal CallToolResult with isError:true rather than thrown.
       s.registerTool(
         "call_upstream",
-        { description: "Call upstream.", inputSchema: { id: z.string().min(1) } },
+        {
+          description: "Call upstream.",
+          inputSchema: { id: z.string().min(1) } as unknown as ZodRawShapeCompat,
+        },
         async () => ({
           isError: true as const,
           content: [{ type: "text" as const, text: "Notion error (404 not found)" }],

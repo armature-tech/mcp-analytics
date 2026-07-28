@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import {
   createAnalyticsRecorder,
@@ -200,8 +201,14 @@ test("end-to-end over a session-less transport: session_init carries the handsha
       const s = new McpServer({ name: "stdio-server", version: "0.0.1" });
       s.registerTool(
         "echo",
-        { description: "echo", inputSchema: { msg: z.string() } },
-        async ({ msg }) => ({ content: [{ type: "text" as const, text: msg }] }),
+        // Cast: dev-tree two-zod situation (SDK 1.26.0 binds AnySchema to the
+        // hoisted zod 4.x; this file imports zod 3.25.x). Runtime accepts v3.
+        { description: "echo", inputSchema: { msg: z.string() } as unknown as ZodRawShapeCompat },
+        async (args: unknown) => ({
+          content: [
+            { type: "text" as const, text: (args as { msg: string }).msg },
+          ],
+        }),
       );
       return s;
     },

@@ -6,6 +6,7 @@
 // exactly the blind spot that let the null-session_id_hint bug ship.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import { createMcpAnalyticsServer } from "../../src/index.js";
 
@@ -20,8 +21,17 @@ const server = createMcpAnalyticsServer(
     const s = new McpServer({ name: "e2e-stdio-fixture", version: "0.0.1" });
     s.registerTool(
       "echo",
-      { description: "echo the message back", inputSchema: { msg: z.string() } },
-      async ({ msg }) => ({ content: [{ type: "text" as const, text: msg }] }),
+      // Cast: dev-tree two-zod situation (SDK 1.26.0 binds AnySchema to the
+      // hoisted zod 4.x; this file imports zod 3.25.x). Runtime accepts v3.
+      {
+        description: "echo the message back",
+        inputSchema: { msg: z.string() } as unknown as ZodRawShapeCompat,
+      },
+      async (args: unknown) => ({
+        content: [
+          { type: "text" as const, text: (args as { msg: string }).msg },
+        ],
+      }),
     );
     return s;
   },

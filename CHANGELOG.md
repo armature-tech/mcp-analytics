@@ -2,6 +2,147 @@
 
 ## Unreleased
 
+### v2 adapter: telemetry schema advertisement (`declareTelemetry`) and per-request metadata
+
+`withMcpAnalytics` and `instrumentedFactory` on `/v2` accept a new
+`V2AdapterOptions` argument:
+
+- **`declareTelemetry: true`** (opt-in) advertises the Armature `telemetry`
+  input property on every instrumented tool's schema — v1 parity for
+  fresh-schema v2 clients, whose model-side telemetry was previously never
+  solicited. The advertised schema is rebuilt from the SDK's own JSON
+  conversion (`toolInputSchemaJson`) plus the telemetry property
+  (byte-identical descriptions to v1) via `fromJsonSchema`, and swapped in
+  with `RegisteredTool.update({ paramsSchema })` — so the SDK's pre-dispatch
+  Ajv validation accepts `telemetry` before the wrapper strips and exports it,
+  `tools/list` advertises it, and zod is bypassed entirely. A top-level
+  `additionalProperties: false` keeps rejecting every other undeclared key.
+  Ownership is resolved against the original schema before decoration, so
+  adapter-added telemetry always resolves armature-owned (strip + export),
+  never customer-owned. Tradeoff: zod runtime effects that don't survive JSON
+  Schema projection (`.transform()`, `.refine()`, applied defaults) no longer
+  run inside SDK validation — hence opt-in.
+- **`metadata(ctx)`** — per-event metadata hook merged into each `tool_call`'s
+  metadata (hook keys beat adapter keys; contract keys beat both; a throwing
+  hook is ignored), replacing the need for forks that patch metadata in.
+
+Per-request capture fixes in the same adapter:
+
+- `metadata.protocol_era` (`"modern"` / `"legacy"`, derived from the presence
+  of the per-request `_meta` envelope) is stamped on every `tool_call`.
+- Per-request `clientCapabilities` now ride `tool_call` metadata
+  (`metadata.capabilities`, same 4KB cap-and-drop as `session_init`), not just
+  `session_init`.
+- `metadata.user_agent` is captured from the request headers (handler ctx
+  first, factory request-context fallback) on both `session_init` and
+  `tool_call` events; previously the v2 adapter never recorded it.
+- `metadata.request_meta` now runs through the same preview sanitization +
+  built-in secret redaction pipeline as tool inputs/results before the 4KB
+  cap; previously sub-cap `_meta` shipped verbatim. Cap and
+  `request_meta_truncated` semantics are unchanged.
+- `wrapMcpHandler` forwards the `fetch(request, { authInfo })` options into
+  the legacy-initialize `session_init` actor resolution, so custom
+  `actorId` / `actorIdentifier` resolvers receive the same `authInfo` shape
+  the tool-call path gets.
+
+### fastmcp adapter: `@armature-tech/mcp-analytics/fastmcp`
+
+New subpath export for servers built on punkpeye/fastmcp (npm `fastmcp`),
+which dispatches tool calls through its own low-level `Server` +
+`setRequestHandler(CallToolRequestSchema, …)` and therefore never hit the
+package root's `McpServer` prototype patches — fastmcp servers were previously
+unrecorded:
+
+- `withFastmcpAnalytics(toolOrTools, options?)` wraps fastmcp tool definition
+  object(s) before `server.addTool(...)` — structurally typed, no runtime or
+  type dependency on the fastmcp package, tool results and all other fields
+  (`annotations`, `canAccess`, `timeoutMs`, `_meta`, …) pass through unchanged.
+- `instrumentFastMCP(server, options?)` wraps `addTool`/`addTools`
+  instance-level (fastmcp's `addTools` does not delegate to `addTool`) and
+  sniffs the transport from `server.start(...)` so httpStream deployments
+  automatically opt out of the stdio process-scoped session fallback. Tools
+  added before the call live in a private field it cannot reach — instrument
+  first, or wrap those tools directly.
+- Captured per call: timing, ok/error (thrown errors and fastmcp `isError`
+  results both record as failures while the value fastmcp receives stays
+  untouched), input/output previews, client identity from
+  `context.client.version` (the session's `initialize` clientInfo), and a
+  session id ladder: `resolveExtra` override → `X-Armature-Session-Seed` (when
+  headers are reachable) → `context.sessionId` (the HTTP `Mcp-Session-Id`) →
+  an `mcp-session-id` inside reachable headers → the stdio process id
+  (stdio/in-process only) → none.
+- Documented, not papered over: fastmcp exposes no HTTP headers to `execute`
+  (opt in by returning `{ headers: req.headers }` from `authenticate`; the
+  adapter reads `context.session.headers`), stateless-mode sessions never see
+  `initialize` so their client is honestly unknown, and tool schemas are not
+  decorated with the `telemetry` block (opaque Standard Schema objects,
+  validated before `execute` with `additionalProperties: false`) — a
+  `telemetry` argument that still arrives is stripped/exported per the
+  contract, and schema-declared `telemetry` fields stay customer-owned.
+- Double-wrap safe: wrapped executes and instrumented servers are tagged, so
+  composing `withFastmcpAnalytics` with `instrumentFastMCP` never
+  double-records. `flushFastmcpAnalytics(options?)` drains the pipeline.
+
+### Vercel mcp-handler: compat coverage + `@armature-tech/mcp-analytics/mcp-handler`
+
+`mcp-handler` (peer-pinned to `@modelcontextprotocol/sdk@1.26.0`) hands its
+initialize callback a real official-SDK `McpServer`, and new compat tests pin
+down that the package root's prototype patch covers it transitively in any
+consistent-module-format host (the SDK ships distinct ESM and CJS builds; a
+host that mixes formats would split the two `McpServer` classes and bypass the
+patch — now documented in the README).
+
+What the tests also pin down: mcp-handler's streamable-HTTP leg is stateless
+only (`sessionIdGenerator` typed `undefined`, a fresh `McpServer` per
+request), so no `Mcp-Session-Id` is ever minted and tool calls recorded a null
+session hint with an unknown client. New `withMcpHandlerAnalytics(handler,
+config?)` repairs both with the v1 stateless pattern applied at the route
+handler: initialize-body sniffing mints the identity-bearing
+`mcp_<name>_v_<version>_<uuid>` id (honoring `X-Armature-Session-Seed`),
+records a full `session_init` (client name/version/protocolVersion/
+capabilities), and attaches the id as the response's `Mcp-Session-Id`;
+conforming clients echo it and every later tool call resolves the session and
+recovers the client from the id alone — stateless, on any instance. The
+session_init a per-request recorder re-emits converges on the same
+content-addressed `event_id` at ingest. `flushMcpHandlerAnalytics(config?)`
+drains the pipeline.
+
+### v2 adapter: `@armature-tech/mcp-analytics/v2` (MCP SDK 2.x / protocol 2026-07-28)
+
+New subpath export for servers on the v2 MCP TypeScript SDK package family
+(`@modelcontextprotocol/server` 2.x, `createMcpHandler`):
+
+- `withMcpAnalytics(server, config?)` instruments a v2 `McpServer` instance
+  (instance-level wrap of `registerTool` plus retroactive wrapping of tools the
+  factory already registered; no prototype patching — the v2 packages ship
+  distinct ESM/CJS builds with distinct prototypes).
+- `instrumentedFactory(factory, config?)` wraps a `createMcpHandler` /
+  `serveStdio` factory; one recorder (privacy queue + session_init dedupe) is
+  shared across the per-request server instances, keyed on the config object.
+- `wrapMcpHandler(handler, config?)` repairs the SDK's silent legacy-session
+  regression: `createMcpHandler`'s stateless legacy leg mints no
+  `Mcp-Session-Id`, so 2025-era clients lose session attribution through a v2
+  handler. The wrapper mints an identity-bearing id
+  (`mcp_<name>_v_<version>_<uuid>`, honoring `X-Armature-Session-Seed`) on
+  legacy initialize responses, records the session_init, and echoes the id.
+- Per-request capture: client identity from the 2026-07-28 `_meta` envelope
+  (stamped on `session_init` and every `tool_call`; tolerant of the
+  spec-optional `clientInfo` being absent), raw request `_meta` as
+  `metadata.request_meta` capped at 4KB with a truncation marker, and a
+  session-id ladder (baggage `gen_ai.conversation.id` → `X-Armature-Session-Seed`
+  → legacy session identity → stdio process-scoped id → none). Tool results are
+  snapshotted synchronously before background recording, so the v2 SDK's
+  post-return `serverInfo` `_meta` stamp never leaks into previews.
+- The shared record pipeline moved to `src/recorder-core.ts` (no v1 SDK
+  imports); the v1 recorder delegates to it unchanged.
+
+Packaging: both MCP SDK peers are now **optional**
+(`peerDependenciesMeta`) — `@modelcontextprotocol/sdk` (range tightened to
+`>=1.20.0 <2`) for the package root and `/mastra`, `@modelcontextprotocol/server`
+`^2.0.0` for `/v2` — so v1-only and v2-only installs both work. npm no longer
+auto-installs either peer; install the one(s) matching the SDK era you serve
+(the `mcp-analytics` doctor CLI needs the v1 SDK).
+
 ### `request_capability` is on by default
 
 The SDK-owned `request_capability` tool now defaults to **on** whenever a

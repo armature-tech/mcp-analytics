@@ -35,7 +35,11 @@ const trimOrUndefined = (value: unknown): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
-const capCapabilities = (
+// Drops a client-capabilities object that would blow past the metadata byte
+// cap (returns null) instead of truncating it into invalid JSON. Exported for
+// the v2 adapter, which stamps per-request capabilities on tool_call events
+// with the same cap as session_init.
+export const capCapabilities = (
   capabilities: McpClientInfo["capabilities"],
 ): Record<string, unknown> | null => {
   if (!isRecord(capabilities)) return null;
@@ -169,6 +173,11 @@ export type BuildToolCallEventInput = {
   finishedAt: string;
   workflowRunId?: string;
   capabilityRequest?: boolean;
+  // Additional metadata keys merged into the tool_call event's metadata.
+  // Spread FIRST, so the contract-defined keys (tool_name, user_intent, …)
+  // always win on a collision. Used by the v2 adapter for per-request client
+  // identity and the captured request `_meta` (request_meta).
+  metadataExtra?: Record<string, unknown>;
   redact?: RedactFunction;
   redactSecrets?: boolean;
 };
@@ -239,6 +248,7 @@ const assembleToolCallEvent = (
     ok: candidate.status === "ok",
     error: candidate.errorMessage ?? null,
     metadata: {
+      ...(input.metadataExtra ?? {}),
       tool_name: candidate.toolName,
       user_intent: t?.user_intent ?? null,
       agent_thinking: t?.agent_thinking ?? null,

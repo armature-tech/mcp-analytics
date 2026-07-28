@@ -8,7 +8,7 @@ import type {
   McpAnalyticsConfig,
   RequestExtra,
 } from "./types.js";
-import { isRecord } from "./utils.js";
+import { isRecord, mergeRequestExtra } from "./utils.js";
 import { z } from "zod";
 import {
   isRequestCapabilityExplicit,
@@ -126,33 +126,7 @@ export const defaultMastraResolveExtra = (
   return Object.keys(result).length > 0 ? result : undefined;
 };
 
-const mergeExtra = (
-  base: RequestExtra | undefined,
-  override: RequestExtra | undefined,
-): RequestExtra | undefined => {
-  if (!base) return override;
-  if (!override) return base;
-  return {
-    ...base,
-    ...override,
-    ...(base.requestInfo || override.requestInfo
-      ? {
-          requestInfo: {
-            ...(base.requestInfo ?? {}),
-            ...(override.requestInfo ?? {}),
-          },
-        }
-      : {}),
-    ...(base.authInfo || override.authInfo
-      ? {
-          authInfo: {
-            ...(base.authInfo ?? {}),
-            ...(override.authInfo ?? {}),
-          },
-        }
-      : {}),
-  };
-};
+const mergeExtra = mergeRequestExtra;
 
 const wrapOneTool = (
   toolKey: string,

@@ -37,13 +37,26 @@ if (supplied >= 0) {
 const consumer = await mkdtemp(join(tmpdir(), "armature-ts-canary-"));
 try {
   await writeFile(join(consumer, "package.json"), JSON.stringify({ type: "module", private: true }));
-  // Install only the packed artifact. Modern npm must resolve its declared MCP
-  // SDK peer automatically, matching a bare `npx @armature-tech/mcp-analytics`
-  // invocation rather than hiding a missing CLI dependency in the canary.
-  execFileSync("npm", ["install", "--ignore-scripts", artifact], {
-    cwd: consumer,
-    stdio: "inherit",
-  });
+  // Install the packed artifact plus its MCP SDK peers explicitly: both the
+  // v1 SDK and the v2 server package are OPTIONAL peers now (so v1-only and
+  // v2-only installs work), which means npm no longer auto-installs either —
+  // a consumer picks the era(s) it serves. The canary consumes both eras, so
+  // it installs both, plus the v2 client to drive the v2 surface.
+  execFileSync(
+    "npm",
+    [
+      "install",
+      "--ignore-scripts",
+      artifact,
+      "@modelcontextprotocol/sdk@1.20.0",
+      "@modelcontextprotocol/server@2.0.0",
+      "@modelcontextprotocol/client@2.0.0",
+    ],
+    {
+      cwd: consumer,
+      stdio: "inherit",
+    },
+  );
   const resolved = execFileSync("node", ["-e", "console.log(require.resolve('@armature-tech/mcp-analytics'))"], {
     cwd: consumer,
     encoding: "utf8",
