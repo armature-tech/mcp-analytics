@@ -49,6 +49,53 @@ export function withExpectedHarnesses(dispatch) {
   };
 }
 
+// Identity-bearing stateless session keys look like
+// `mcp:mcp_<client>_v_<version>_<uuid>`, where the uuid is the
+// X-Armature-Session-Seed the server honored at mint time (the workflow run
+// id for harness traffic). Returns the embedded uuid, lowercased, or null
+// for any other key shape.
+const STATELESS_SESSION_KEY_UUID_RE =
+  /^mcp:mcp_[A-Za-z0-9.-]+_v_[A-Za-z0-9.-]*_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+export function sessionSeedUuid(sessionKey) {
+  const match = STATELESS_SESSION_KEY_UUID_RE.exec(String(sessionKey || ""));
+  return match ? match[1].toLowerCase() : null;
+}
+
+// The stable canary URL is shared, and the readback matches sessions by the
+// deployed marker intent, which ANY agent hitting the deployment inherits
+// from the tool descriptions. Traffic from workflow runs this dispatch did
+// not create can therefore land in the readback window: a concurrent canary
+// CI run, or the platform's system-error retry sweeper, which resurrects an
+// EARLIER dispatch's runs (canary dispatches skip the evaluator, so those
+// runs terminalize as timed_out/evaluator_not_started ~1h later and are
+// retried under fresh run ids that replay the whole conversation against
+// the currently promoted deployment).
+//
+// Such sessions are healthy — their keys embed the seed of a real (foreign)
+// workflow run — so they must not fail the per-session correlation gate.
+// They are only classified foreign when the key is a WELL-FORMED
+// identity-bearing stateless key whose embedded uuid matches no dispatched
+// run and the trace carries no correlation either. Malformed, bare-uuid, or
+// fallback-bucketed keys stay in `ours` so hint-loss regressions still fail
+// loudly, and a genuine seed regression (random mints) is still caught by
+// selectExpectedHarnessEvidence: the dispatched runs would then have no
+// seeded session at all.
+export function partitionHarnessEvidence({ dispatch, evidence }) {
+  const dispatched = new Set(dispatch.runs.map((run) => String(run.runId).toLowerCase()));
+  const ours = [];
+  const foreign = [];
+  for (const item of evidence) {
+    const seed = sessionSeedUuid(item.session?.session_key);
+    if (item.workflowRunIds.length === 0 && seed && !dispatched.has(seed)) {
+      foreign.push(item);
+    } else {
+      ours.push(item);
+    }
+  }
+  return { ours, foreign };
+}
+
 // A real harness may start a correlated wrong-family fallback attempt before
 // the requested runner succeeds. Require exactly one correct-family session
 // for every dispatched run; extra fallback sessions remain visible in the
@@ -78,9 +125,11 @@ export function formatSessionEvidence({ packageName, base, dispatch, evidence })
     "|---|---|---|---:|---|---|---|",
     ...evidence.map(({ session, toolNames, workflowRunIds, workflowRunId, run }) => {
       let correlation = "missing";
+      const foreignSeed = workflowRunIds.length === 0 ? sessionSeedUuid(session?.session_key) : null;
       if (workflowRunIds.length > 1) correlation = `ambiguous: ${workflowRunIds.join(", ")}`;
       else if (workflowRunId && run) correlation = `${run.wave}/${run.modelId}: [${workflowRunId}](${base}/runs/${workflowRunId})`;
       else if (workflowRunId) correlation = `undispatched: [${workflowRunId}](${base}/runs/${workflowRunId})`;
+      else if (foreignSeed) correlation = `foreign: [${foreignSeed}](${base}/runs/${foreignSeed})`;
       return `| ${packageName} | ${session.client_name || "unknown"} | ${session.session_key || "missing"} | ${session.event_count} | ${toolNames.join(" → ") || "missing"} | ${correlation} | [${session.id}](${base}/mcp-analytics/sessions/${session.id}) |`;
     }),
     "",

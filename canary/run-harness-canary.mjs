@@ -5,6 +5,7 @@ import {
   collectSessionEvidence,
   formatSessionEvidence,
   harnessFamily,
+  partitionHarnessEvidence,
   selectExpectedHarnessEvidence,
   withExpectedHarnesses,
 } from "./session-evidence.mjs";
@@ -68,7 +69,18 @@ const evidenceTable = formatSessionEvidence({ packageName, base, dispatch, evide
 console.log(evidenceTable);
 if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `${evidenceTable}\n`);
 
-for (const { session, workflowRunIds, run } of evidence) {
+// Sessions seeded by workflow runs this dispatch did not create (concurrent
+// canary CI runs, or the platform's system-error retries of an earlier
+// dispatch's runs) share the stable URL and inherit the deployed marker, so
+// they land in the readback. They are healthy foreign traffic: exclude them
+// from the strict per-session gate, and rely on selectExpectedHarnessEvidence
+// to positively require every dispatched run's own seeded session — which
+// still fails when a real seed regression mints random session ids.
+const { ours, foreign } = partitionHarnessEvidence({ dispatch, evidence });
+if (foreign.length > 0) {
+  console.log(`ignoring ${foreign.length} foreign harness session(s) seeded by undispatched workflow runs: ${foreign.map(item => item.session.session_key).join(", ")}`);
+}
+for (const { session, workflowRunIds, run } of ours) {
   assert.equal(workflowRunIds.length, 1, `${session.id}: expected exactly one workflow correlation, got ${workflowRunIds.join(", ") || "none"}`);
   assert.ok(run, `${session.id}: session did not correlate to a dispatched workflow run`);
 }
@@ -84,12 +96,12 @@ assert.deepEqual(
   `expected two Claude Code and two Codex sessions, got ${expectedSessions.map(session => session.client_name || "unknown").join(", ")}`,
 );
 
-for (const { session } of evidence) {
+for (const { session } of ours) {
   assert.ok(session.event_count > 0, `${session.id}: session was empty`);
   assert.equal(session.error_count, 0, `${session.id}: canary tool call failed`);
 }
-if (matches.length > expectedSessions.length) {
-  console.log(`observed ${matches.length - expectedSessions.length} correlated fallback harness session(s)`);
+if (matches.length > expectedSessions.length + foreign.length) {
+  console.log(`observed ${matches.length - expectedSessions.length - foreign.length} correlated fallback harness session(s)`);
 }
 
 console.log(`verified four isolated Claude Code/Codex sessions for ${packageName}: ${dispatch.runs.map(run => run.runId).join(", ")}`);
