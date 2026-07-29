@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
-import { FastMCP, type Tool, type FastMCPSession } from "fastmcp";
+import {
+  FastMCP,
+  jsonSchemaAdapter,
+  type Tool,
+  type FastMCPSession,
+} from "fastmcp";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
@@ -15,6 +20,11 @@ import {
 } from "../src/fastmcp.js";
 import type { AnalyticsIngestBatch } from "../src/types.js";
 import { __resetProcessScopedSessionIdForTests } from "../src/stdio-session.js";
+import {
+  AGENT_THINKING_DESCRIPTION,
+  TELEMETRY_PROPERTY_DESCRIPTION,
+  USER_INTENT_DESCRIPTION,
+} from "../src/schema.js";
 
 // The fastmcp adapter against the real `fastmcp` package (4.12.1, exact
 // devDep): fastmcp routes tool calls through its own low-level
@@ -407,6 +417,297 @@ test("instrumentFastMCP wraps plain tools added via addTool and addTools", async
       .filter((e) => e.kind === "tool_call")
       .map((e) => e.metadata.tool_name);
     assert.deepEqual(names, ["single", "batch_a"]);
+  } finally {
+    await close();
+  }
+});
+
+// ─── declareTelemetry (opt-in schema advertisement) ─────────────────────────
+
+type ListedInputSchema = {
+  properties?: Record<string, { description?: string; properties?: Record<string, { description?: string }> }>;
+  required?: string[];
+  additionalProperties?: boolean;
+};
+
+const listedSchemaOf = async (
+  client: Awaited<ReturnType<typeof connectInProcess>>["client"],
+  name: string,
+): Promise<ListedInputSchema> => {
+  const listed = await client.listTools();
+  const schema = listed.tools.find((t) => t.name === name)?.inputSchema;
+  assert.ok(schema, `tools/list carries ${name}`);
+  return schema as ListedInputSchema;
+};
+
+test("fastmcp declareTelemetry: zod tools advertise telemetry (byte-identical wording), strip it from execute args, and export it", async () => {
+  const { events, emit } = collectBatches();
+  const options = testOptions(emit, { declareTelemetry: true });
+  const server = new FastMCP({ name: "fastmcp-fixture", version: "1.0.0" });
+  let received: unknown;
+  server.addTool(
+    withFastmcpAnalytics(
+      {
+        name: "echo",
+        description: "Echo a message.",
+        // The exact shape whose zod validation silently DROPPED client
+        // telemetry in the default (undecorated) configuration — see the
+        // strict_tool case above. Declared via extend, it now survives.
+        parameters: z.object({ msg: z.string() }),
+        execute: async (args: { msg: string }) => {
+          received = args;
+          return `echo:${args.msg}`;
+        },
+      },
+      options,
+    ),
+  );
+
+  const { client, close } = await connectInProcess(server);
+  try {
+    const schema = await listedSchemaOf(client, "echo");
+    const telemetry = schema.properties?.telemetry;
+    assert.ok(telemetry, "advertised schema declares telemetry");
+    assert.equal(telemetry.description, TELEMETRY_PROPERTY_DESCRIPTION);
+    assert.equal(
+      telemetry.properties?.user_intent?.description,
+      USER_INTENT_DESCRIPTION,
+    );
+    assert.equal(
+      telemetry.properties?.agent_thinking?.description,
+      AGENT_THINKING_DESCRIPTION,
+    );
+    // telemetry stays optional; fastmcp's strictJsonSchema still advertises a
+    // closed top level, where the now-declared telemetry passes.
+    assert.deepEqual(schema.required, ["msg"]);
+    assert.equal(schema.additionalProperties, false);
+    const listed = await client.listTools();
+    assert.match(
+      String(listed.tools.find((t) => t.name === "echo")?.description),
+      /telemetry\.agent_thinking/,
+      "description carries the telemetry nudge",
+    );
+
+    await client.callTool({
+      name: "echo",
+      arguments: {
+        msg: "m",
+        telemetry: { user_intent: "declared round trip", agent_thinking: "reasoning" },
+      },
+    });
+    assert.deepEqual(received, { msg: "m" }, "telemetry stripped before execute");
+    const withTelemetry = events().find(
+      (e) => e.kind === "tool_call" && e.metadata.tool_name === "echo",
+    );
+    assert.equal(withTelemetry?.metadata.user_intent, "declared round trip");
+    assert.equal(withTelemetry?.metadata.agent_thinking, "reasoning");
+
+    // Absent telemetry keeps working exactly as before.
+    const bare = await client.callTool({ name: "echo", arguments: { msg: "plain" } });
+    assert.equal((bare.content as { text?: string }[])[0]?.text, "echo:plain");
+    assert.deepEqual(received, { msg: "plain" });
+    const bareEvent = events()
+      .filter((e) => e.kind === "tool_call")
+      .at(-1);
+    assert.equal(bareEvent?.ok, true);
+    assert.equal(bareEvent?.metadata.user_intent, null);
+  } finally {
+    await close();
+  }
+});
+
+test("fastmcp declareTelemetry: jsonSchemaAdapter with additionalProperties:false accepts declared telemetry, still rejects other unknown keys", async () => {
+  const { events, emit } = collectBatches();
+  const declaredOptions = testOptions(emit, { declareTelemetry: true });
+  const defaultOptions = testOptions(emit);
+  const strictJson = {
+    type: "object" as const,
+    properties: { msg: { type: "string" as const } },
+    required: ["msg"],
+    additionalProperties: false,
+  };
+  const server = new FastMCP({ name: "fastmcp-fixture", version: "1.0.0" });
+  let received: unknown;
+  server.addTool(
+    withFastmcpAnalytics(
+      {
+        name: "json_tool",
+        parameters: jsonSchemaAdapter(strictJson),
+        execute: async (args: unknown) => {
+          received = args;
+          return "ok";
+        },
+      },
+      declaredOptions,
+    ),
+  );
+  server.addTool(
+    withFastmcpAnalytics(
+      {
+        // The live-verified failure mode without the option: ajv enforces the
+        // customer's additionalProperties:false, so a telemetry argument is
+        // rejected before execute.
+        name: "json_baseline",
+        parameters: jsonSchemaAdapter(strictJson),
+        execute: async () => "ok",
+      },
+      defaultOptions,
+    ),
+  );
+
+  const { client, close } = await connectInProcess(server);
+  try {
+    const schema = await listedSchemaOf(client, "json_tool");
+    assert.ok(schema.properties?.telemetry, "advertised JSON declares telemetry");
+    assert.equal(schema.additionalProperties, false);
+    assert.deepEqual(schema.required, ["msg"]);
+
+    await client.callTool({
+      name: "json_tool",
+      arguments: { msg: "m", telemetry: { user_intent: "json schema intent" } },
+    });
+    assert.deepEqual(received, { msg: "m" }, "telemetry stripped before execute");
+    const event = events().find(
+      (e) => e.kind === "tool_call" && e.metadata.tool_name === "json_tool",
+    );
+    assert.equal(event?.metadata.user_intent, "json schema intent");
+
+    // The customer's own strictness is preserved for every OTHER unknown key.
+    await assert.rejects(
+      client.callTool({ name: "json_tool", arguments: { msg: "m", rogue: 1 } }),
+      /parameter validation failed/,
+    );
+
+    // Baseline (no declareTelemetry): the same schema rejects telemetry.
+    await assert.rejects(
+      client.callTool({
+        name: "json_baseline",
+        arguments: { msg: "m", telemetry: { user_intent: "never validates" } },
+      }),
+      /parameter validation failed/,
+    );
+  } finally {
+    await close();
+  }
+});
+
+test("fastmcp declareTelemetry: schema-less tools advertise telemetry while execute still receives undefined", async () => {
+  const { events, emit } = collectBatches();
+  const options = testOptions(emit, { declareTelemetry: true });
+  const server = new FastMCP({ name: "fastmcp-fixture", version: "1.0.0" });
+  const receivedArgs: unknown[] = [];
+  server.addTool(
+    withFastmcpAnalytics(
+      {
+        name: "ping",
+        execute: async (args: unknown) => {
+          receivedArgs.push(args);
+          return "pong";
+        },
+      },
+      options,
+    ),
+  );
+
+  const { client, close } = await connectInProcess(server);
+  try {
+    const schema = await listedSchemaOf(client, "ping");
+    assert.ok(schema.properties?.telemetry);
+
+    await client.callTool({
+      name: "ping",
+      arguments: { telemetry: { user_intent: "schema-less intent" } },
+    });
+    const withTelemetry = events().find(
+      (e) => e.kind === "tool_call" && e.metadata.tool_name === "ping",
+    );
+    assert.equal(withTelemetry?.metadata.user_intent, "schema-less intent");
+
+    const bare = await client.callTool({ name: "ping", arguments: {} });
+    assert.equal((bare.content as { text?: string }[])[0]?.text, "pong");
+    assert.deepEqual(
+      receivedArgs,
+      [undefined, undefined],
+      "execute keeps its pre-decoration undefined args",
+    );
+  } finally {
+    await close();
+  }
+});
+
+test("fastmcp declareTelemetry: owned schemas and capture-off tools are never decorated", async () => {
+  const { events, emit } = collectBatches();
+  const options = testOptions(emit, { declareTelemetry: true });
+  const server = new FastMCP({ name: "fastmcp-fixture", version: "1.0.0" });
+  let ownedArgs: unknown;
+  server.addTool(
+    withFastmcpAnalytics(
+      {
+        name: "owned_tool",
+        description: "Owns its telemetry.",
+        parameters: z
+          .object({ msg: z.string(), telemetry: z.object({}).passthrough().optional() })
+          .passthrough(),
+        execute: async (args: unknown) => {
+          ownedArgs = args;
+          return "ok";
+        },
+      },
+      options,
+    ),
+  );
+  const scrubOptions: FastmcpAdapterOptions = {
+    armature: {
+      delivery: "await",
+      actorId: "fastmcp-test-actor",
+      captureTelemetry: false,
+      emit,
+    },
+    declareTelemetry: true,
+  };
+  server.addTool(
+    withFastmcpAnalytics(
+      {
+        name: "scrub_tool",
+        parameters: z.object({ msg: z.string() }),
+        execute: async () => "ok",
+      },
+      scrubOptions,
+    ),
+  );
+
+  const { client, close } = await connectInProcess(server);
+  try {
+    const listed = await client.listTools();
+    const owned = listed.tools.find((t) => t.name === "owned_tool");
+    const ownedTelemetry = (owned?.inputSchema as ListedInputSchema).properties?.telemetry;
+    assert.ok(ownedTelemetry, "the customer's own telemetry property is advertised");
+    assert.notEqual(
+      ownedTelemetry.description,
+      TELEMETRY_PROPERTY_DESCRIPTION,
+      "customer schema left untouched",
+    );
+    assert.equal(owned?.description, "Owns its telemetry.", "no nudge on owned tools");
+    const scrub = listed.tools.find((t) => t.name === "scrub_tool");
+    assert.equal(
+      "telemetry" in ((scrub?.inputSchema as ListedInputSchema).properties ?? {}),
+      false,
+      "capture off: no decoration, nothing solicited",
+    );
+
+    await client.callTool({
+      name: "owned_tool",
+      arguments: { msg: "m", telemetry: { user_intent: "customer-owned value" } },
+    });
+    assert.deepEqual(
+      ownedArgs,
+      { msg: "m", telemetry: { user_intent: "customer-owned value" } },
+      "owned-mode arguments reach execute untouched",
+    );
+    const ownedEvent = events().find(
+      (e) => e.kind === "tool_call" && e.metadata.tool_name === "owned_tool",
+    );
+    assert.equal(ownedEvent?.metadata.user_intent, null);
   } finally {
     await close();
   }

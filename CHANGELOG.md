@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### fastmcp adapter: telemetry schema advertisement (`declareTelemetry`)
+
+`FastmcpAdapterOptions` accepts **`declareTelemetry: true`** (opt-in,
+matching the `/v2` adapter option of the same name): every tool wrapped by
+`withFastmcpAnalytics` / instrumented via `instrumentFastMCP` advertises the
+Armature `telemetry` input property (byte-identical descriptions to v1) plus
+the description nudge. fastmcp regenerates the advertised `tools/list` schema
+from the `parameters` Standard Schema in its private `#tools`, so decoration
+happens on the tool definition's `parameters` before `addTool`: zod object
+parameters are extended with the telemetry field (fastmcp's own pre-execute
+validation then keeps it), `jsonSchemaAdapter` parameters are re-wrapped so
+the advertised JSON declares `telemetry` and validation accepts it while
+delegating everything else to the original ajv validator (a top-level
+`additionalProperties: false` keeps rejecting every other undeclared key),
+and schema-less tools gain a telemetry-only parameters object whose `execute`
+still receives `undefined`. The wrapper strips the argument before `execute`
+and exports it; ownership is resolved against the original schema before
+decoration, so adapter-added telemetry is always armature-owned. Without the
+option, fastmcp servers never advertise the field and agents never send
+telemetry (verified live 2026-07-29 against fastmcp 4.12.1: correct
+session/client identity, null `user_intent`/`agent_thinking`).
+
 ### v2 adapter: telemetry schema advertisement (`declareTelemetry`) and per-request metadata
 
 `withMcpAnalytics` and `instrumentedFactory` on `/v2` accept a new

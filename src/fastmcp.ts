@@ -10,7 +10,13 @@ import {
   type AnalyticsRecorderCore,
 } from "./recorder-core.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
-import { isCaptureEnabled, schemaDeclaresTelemetry } from "./schema.js";
+import {
+  appendTelemetryHint,
+  createTelemetryJsonSchema,
+  decorateInputSchemaWithTelemetry,
+  isCaptureEnabled,
+  schemaDeclaresTelemetry,
+} from "./schema.js";
 import { headerValue, isRecord, mergeRequestExtra } from "./utils.js";
 
 // Adapter for punkpeye/fastmcp (npm `fastmcp`, v1-SDK based). fastmcp routes
@@ -63,13 +69,22 @@ import { headerValue, isRecord, mergeRequestExtra } from "./utils.js";
 //   `undefined` there and tool calls record an unknown client — honest, since
 //   nothing else in the execute context carries identity.
 // - Tool input schemas are opaque Standard Schema objects that fastmcp
-//   validates BEFORE `execute` (advertising `additionalProperties: false`), so
-//   the adapter does NOT decorate schemas with the `telemetry` field (same
-//   decision, for the same conversion-hazard reasons, as the v2 adapter). A
-//   `telemetry` argument that still reaches `execute` (e.g. a passthrough zod
-//   object) is stripped and exported per the contract; a schema that declares
-//   its own top-level `telemetry` keeps owning it ("owned" mode); with capture
-//   off it is stripped and dropped ("scrub").
+//   validates BEFORE `execute` (advertising `additionalProperties: false` via
+//   xsschema's `strictJsonSchema`), so by default the adapter does NOT
+//   decorate schemas with the `telemetry` field (same default, for the same
+//   conversion-hazard reasons, as the v2 adapter). A `telemetry` argument that
+//   still reaches `execute` (e.g. a passthrough zod object) is stripped and
+//   exported per the contract; a schema that declares its own top-level
+//   `telemetry` keeps owning it ("owned" mode); with capture off it is
+//   stripped and dropped ("scrub").
+// - `declareTelemetry: true` (opt-in, v2-adapter parity) decorates the tool
+//   definition's `parameters` BEFORE `addTool` — the only decoration point
+//   that works, because fastmcp regenerates the advertised `tools/list` schema
+//   from the `parameters` Standard Schema held in its private `#tools`
+//   (`strictJsonSchema(await toJsonSchema(tool.parameters))`), so no
+//   registered artifact can be patched after the fact. Without it a fresh-
+//   schema client is never told about `telemetry` and model-side telemetry
+//   simply never arrives (verified live 2026-07-29 against fastmcp 4.12.1).
 
 /** Header a caller can set to pin the analytics session id (matches the v1 stateless pattern and the v2 ladder). */
 export const FASTMCP_SESSION_SEED_HEADER = "x-armature-session-seed";
@@ -118,6 +133,31 @@ export type FastmcpAdapterOptions = McpAnalyticsConfig & {
    * `server.start(...)` and overrides this automatically.
    */
   transport?: "stdio" | "httpStream";
+  /**
+   * Advertise the Armature `telemetry` input property on every instrumented
+   * tool's schema (v2-adapter parity, opt-in). The tool definition's
+   * `parameters` is decorated BEFORE `addTool` — fastmcp regenerates the
+   * advertised schema from that Standard Schema, so this is the only point
+   * where decoration can take effect. Zod object parameters are `.extend`ed
+   * with the optional telemetry field (byte-identical descriptions to the v1
+   * integration); Standard JSON Schema parameters (fastmcp's
+   * `jsonSchemaAdapter`) are re-wrapped so the advertised JSON gains the
+   * `telemetry` property and validation accepts-then-forwards it (a top-level
+   * `additionalProperties: false` keeps rejecting every OTHER undeclared key,
+   * because `telemetry` becomes a declared property); schema-less tools gain a
+   * telemetry-only parameters object (their `execute` still receives
+   * `undefined`). The wrapper strips the argument before `execute` and exports
+   * it — ownership is resolved against the original schema before decoration,
+   * so adapter-added telemetry is always armature-owned, never customer-owned.
+   *
+   * Tools whose parameters are neither a zod object nor a Standard JSON
+   * Schema (other Standard Schema vendors) are left undecorated — a
+   * `telemetry` argument that reaches `execute` anyway is still stripped and
+   * exported. `captureTelemetry: false` disables decoration entirely. Note the
+   * returned tool keeps the caller's compile-time type while its runtime
+   * `parameters` differ — hand it straight to `addTool`.
+   */
+  declareTelemetry?: boolean;
 };
 
 type FastmcpRecorderState = {
@@ -156,7 +196,12 @@ const recorderStateFor = (
   }
   let state = recorderStatesByOptions.get(options);
   if (!state) {
-    const { resolveExtra: _resolveExtra, transport: _transport, ...config } = options;
+    const {
+      resolveExtra: _resolveExtra,
+      transport: _transport,
+      declareTelemetry: _declareTelemetry,
+      ...config
+    } = options;
     state = createRecorderState(config);
     recorderStatesByOptions.set(options, state);
   }
@@ -271,23 +316,178 @@ const standardSchemaJson = (parameters: unknown): unknown => {
   }
 };
 
+// ─── declareTelemetry: parameters decoration ────────────────────────────────
+
+// Minimal structural view of a Standard Schema's `~standard`, plus the JSON
+// Schema extension fastmcp's `jsonSchemaAdapter` implements.
+type StandardSchemaInternals = {
+  vendor?: unknown;
+  version?: unknown;
+  validate: (value: unknown) => unknown;
+  jsonSchema?: {
+    input?: (...args: unknown[]) => unknown;
+    output?: (...args: unknown[]) => unknown;
+  };
+};
+
+const standardInternalsOf = (
+  parameters: unknown,
+): StandardSchemaInternals | undefined => {
+  if (!isRecord(parameters)) return undefined;
+  const standard = parameters["~standard"];
+  if (!isRecord(standard) || typeof standard.validate !== "function") {
+    return undefined;
+  }
+  return standard as StandardSchemaInternals;
+};
+
+// Adds the telemetry property to a JSON object schema. `additionalProperties:
+// false` needs no lifting — JSON Schema applies it only to keys NOT in
+// `properties`, so declaring `telemetry` makes it pass while every other
+// unknown key is still rejected (the same fact the v2 adapter's
+// decorateAdvertisedSchema relies on). Non-object roots pass through
+// untouched.
+const decorateJsonWithTelemetry = (
+  json: unknown,
+  config: McpAnalyticsConfig,
+): unknown => {
+  if (!isRecord(json)) return json;
+  if (json.type !== undefined && json.type !== "object") return json;
+  const properties = isRecord(json.properties) ? json.properties : {};
+  if ("telemetry" in properties) return json;
+  return {
+    ...json,
+    type: "object",
+    properties: { ...properties, telemetry: createTelemetryJsonSchema(config) },
+  };
+};
+
+// Re-wraps a Standard JSON Schema parameters object (fastmcp's
+// `jsonSchemaAdapter`, or any `~standard.jsonSchema` carrier): the advertised
+// JSON gains the telemetry property, while validation splits `telemetry` off,
+// delegates the rest to the ORIGINAL validator verbatim (so the user's ajv
+// semantics — including `additionalProperties: false` on their own keys — are
+// preserved exactly), and re-attaches it to the validated value for the
+// analytics wrapper to strip. A non-record `telemetry` is left in place and
+// hits the original validator unchanged, same as before decoration.
+const decorateStandardJsonSchemaParameters = (
+  original: StandardSchemaInternals,
+  config: McpAnalyticsConfig,
+): unknown => {
+  const originalInput = original.jsonSchema?.input;
+  const originalOutput = original.jsonSchema?.output ?? originalInput;
+  return {
+    "~standard": {
+      vendor: original.vendor,
+      version: original.version ?? 1,
+      jsonSchema: {
+        input: (...args: unknown[]) =>
+          decorateJsonWithTelemetry(originalInput?.(...args), config),
+        output: (...args: unknown[]) =>
+          decorateJsonWithTelemetry(originalOutput?.(...args), config),
+      },
+      validate: async (value: unknown) => {
+        if (!isRecord(value) || !isRecord(value.telemetry)) {
+          return original.validate(value);
+        }
+        const { telemetry, ...rest } = value;
+        const result = await original.validate(rest);
+        if (!isRecord(result) || result.issues !== undefined) return result;
+        return isRecord(result.value)
+          ? { value: { ...result.value, telemetry } }
+          : result;
+      },
+    },
+  };
+};
+
+// Telemetry-only parameters for a previously schema-less tool. fastmcp never
+// validated its arguments before (schema-less tools skip validation and get
+// `execute(undefined, ...)`), so validation stays fully permissive; the
+// wrapper restores `undefined` for the original execute.
+const telemetryOnlyParameters = (config: McpAnalyticsConfig): unknown => {
+  const json = {
+    type: "object",
+    properties: { telemetry: createTelemetryJsonSchema(config) },
+  };
+  return {
+    "~standard": {
+      vendor: "armature-mcp-analytics",
+      version: 1,
+      jsonSchema: { input: () => json, output: () => json },
+      validate: (value: unknown) => ({ value }),
+    },
+  };
+};
+
+// The decorated replacement for a tool's `parameters`, or undefined when the
+// tool must stay undecorated (unrecognized schema shape — strip-and-export
+// still applies to any telemetry that reaches execute).
+const decorateFastmcpParameters = (
+  parameters: unknown,
+  config: McpAnalyticsConfig,
+): unknown => {
+  if (parameters === undefined) {
+    return telemetryOnlyParameters(config);
+  }
+  // Zod object (v3 or v4 — decorateInputSchemaWithTelemetry discriminates the
+  // major): extend with the telemetry field, so fastmcp's own pre-execute
+  // validation keeps `telemetry` (a plain v3 object strips undeclared keys, a
+  // strict one rejects them — declared keys always survive).
+  if (
+    isRecord(parameters)
+    && "shape" in parameters
+    && typeof parameters.extend === "function"
+  ) {
+    try {
+      return decorateInputSchemaWithTelemetry(parameters, config);
+    } catch {
+      return undefined;
+    }
+  }
+  const original = standardInternalsOf(parameters);
+  if (original === undefined) return undefined;
+  const json = standardSchemaJson(parameters);
+  if (!isRecord(json)) return undefined;
+  // Only object roots can carry the property; `type` may legitimately be
+  // absent on object-shaped roots.
+  if (json.type !== undefined && json.type !== "object") return undefined;
+  return decorateStandardJsonSchemaParameters(original, config);
+};
+
 // ─── Tool wrapping ──────────────────────────────────────────────────────────
 
 const wrapFastmcpTool = <T extends FastmcpToolLike>(
   tool: T,
   state: FastmcpRecorderState,
   runtime: FastmcpRuntime,
-  resolveExtra: FastmcpAdapterOptions["resolveExtra"],
+  options: FastmcpAdapterOptions | undefined,
 ): T => {
   if (typeof tool?.execute !== "function") return tool;
   const originalExecute = tool.execute as FastmcpToolExecute & {
     [WRAPPED_EXECUTE]?: boolean;
   };
   if (originalExecute[WRAPPED_EXECUTE]) return tool;
+  const resolveExtra = options?.resolveExtra;
 
   const toolName = tool.name;
+  // Mode is resolved against the ORIGINAL parameters, before any
+  // declareTelemetry decoration — a telemetry property the ADAPTER added must
+  // stay armature-owned (strip + export), never customer-owned.
   const mode = resolveFastmcpToolMode(tool.parameters, state.config);
   state.toolModes.set(toolName, mode);
+
+  // declareTelemetry only decorates tools in "injected" mode: an "owned"
+  // schema already declares telemetry (the customer's contract), and "scrub"
+  // means capture is off — advertising the field would solicit telemetry we
+  // would then drop.
+  const decoratedParameters = options?.declareTelemetry === true && mode === "injected"
+    ? decorateFastmcpParameters(tool.parameters, state.config)
+    : undefined;
+  // A decorated previously-schema-less tool now receives validated args from
+  // fastmcp, but its execute was written for `undefined`.
+  const restoreUndefinedArgs =
+    decoratedParameters !== undefined && tool.parameters === undefined;
 
   const wrappedExecute: FastmcpToolExecute = (args, context) => {
     const base = defaultFastmcpResolveExtra(context);
@@ -333,12 +533,25 @@ const wrapFastmcpTool = <T extends FastmcpToolLike>(
       // fastmcp calls execute(undefined, context) for tools without
       // `parameters`; extractTelemetryArguments passes non-records through
       // untouched, so `strippedArgs` is exactly what fastmcp supplied then.
-      (strippedArgs) => originalExecute(strippedArgs, context),
+      (strippedArgs) =>
+        originalExecute(restoreUndefinedArgs ? undefined : strippedArgs, context),
     );
   };
   (wrappedExecute as unknown as Record<PropertyKey, unknown>)[WRAPPED_EXECUTE] = true;
 
-  return { ...tool, execute: wrappedExecute };
+  if (decoratedParameters === undefined) {
+    return { ...tool, execute: wrappedExecute };
+  }
+  // The cast: decoration intentionally swaps `parameters` for a schema whose
+  // runtime shape differs from the caller's declared type (documented on the
+  // option) — every other field still passes through by spread.
+  return {
+    ...tool,
+    parameters: decoratedParameters,
+    // Same idempotent description nudge as the v1/v2 integrations (ARM-24).
+    description: appendTelemetryHint(tool.description),
+    execute: wrappedExecute,
+  } as T;
 };
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -375,10 +588,10 @@ export function withFastmcpAnalytics<T extends FastmcpToolLike>(
   };
   if (Array.isArray(toolOrTools)) {
     return toolOrTools.map((tool) =>
-      wrapFastmcpTool(tool, state, runtime, options?.resolveExtra),
+      wrapFastmcpTool(tool, state, runtime, options),
     );
   }
-  return wrapFastmcpTool(toolOrTools, state, runtime, options?.resolveExtra);
+  return wrapFastmcpTool(toolOrTools, state, runtime, options);
 }
 
 /** Structural stand-in for a `FastMCP` server: anything with `addTool`. */
@@ -443,12 +656,7 @@ export const instrumentFastMCP = <S extends FastMCPLike>(
   };
   const wrap = (tool: unknown) =>
     isRecord(tool)
-      ? wrapFastmcpTool(
-          tool as FastmcpToolLike,
-          state,
-          runtime,
-          options?.resolveExtra,
-        )
+      ? wrapFastmcpTool(tool as FastmcpToolLike, state, runtime, options)
       : tool;
 
   const originalAddTool = internals.addTool;
