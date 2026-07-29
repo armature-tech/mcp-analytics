@@ -27,7 +27,10 @@ import { capCapabilities } from "./events.js";
 import { prepareForPreview } from "./sanitize.js";
 import { headerValue, isRecord, stringifyPreview, truncateUtf8 } from "./utils.js";
 import { processScopedSessionId } from "./stdio-session.js";
-import { resolveStatelessHttpSession } from "./stateless-http.js";
+import {
+  clientInfoFromInitializeBody,
+  resolveStatelessHttpSession,
+} from "./stateless-http.js";
 
 // Adapter for the v2 MCP TypeScript SDK (@modelcontextprotocol/server 2.x,
 // protocol revision 2026-07-28). The v2 protocol is stateless: there is no
@@ -819,10 +822,11 @@ export const wrapMcpHandler = <H extends V2McpHandlerLike>(
       ? (fetchOptions.authInfo as RequestExtra["authInfo"])
       : undefined;
     let session: ReturnType<typeof resolveStatelessHttpSession> | undefined;
+    let body: unknown;
     if (request.method === "POST") {
       try {
         const raw = await request.clone().text();
-        const body: unknown = raw ? JSON.parse(raw) : undefined;
+        body = raw ? JSON.parse(raw) : undefined;
         // `initialize` exists only on the 2025 era, so `isInitialize` doubles
         // as the legacy detector; modern-era requests fall through untouched.
         session = resolveStatelessHttpSession({ body, headers: request.headers });
@@ -834,14 +838,17 @@ export const wrapMcpHandler = <H extends V2McpHandlerLike>(
     const response = await originalFetch(request, ...rest);
 
     if (session?.isInitialize && response.ok) {
-      // The identity-bearing id embeds the initialize body's clientInfo, and
-      // the recorder recovers name/version from it (parseStatelessSessionClientInfo)
-      // — so the session_init recorded here is attributed even though the
-      // initialize landed on a throwaway per-request server instance.
+      // Full-fidelity clientInfo from the initialize body: the minted id only
+      // carries name/version, so without this the session_init would lose the
+      // negotiated protocolVersion (and capabilities) — recorded here even
+      // though the initialize landed on a throwaway per-request server
+      // instance.
+      const clientInfo = clientInfoFromInitializeBody(body);
       try {
         await state.core.recordSessionInit({
           sessionId: session.sessionId,
           headers: request.headers,
+          ...(clientInfo !== undefined ? { clientInfo } : {}),
           ...(authInfo !== undefined ? { authInfo } : {}),
           extra: {
             sessionId: session.sessionId,

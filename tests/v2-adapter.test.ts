@@ -300,6 +300,63 @@ test("v2 legacy era through wrapMcpHandler: identity-bearing Mcp-Session-Id is m
   }
 });
 
+test("v2 legacy era through wrapMcpHandler: session_init carries the negotiated protocol version", async () => {
+  const { events, emit } = collectBatches();
+  const config = testConfig(emit);
+  const handler = wrapMcpHandler(
+    createMcpHandler(instrumentedFactory(() => buildEchoServer(), config)),
+    config,
+  );
+
+  // Sniff the protocolVersion the legacy client actually sends at initialize,
+  // so the assertion tracks the SDK's negotiated version instead of pinning it.
+  let sentProtocolVersion: string | undefined;
+  const transport = new StreamableHTTPClientTransport(
+    new URL("http://in-process.local/mcp"),
+    {
+      fetch: (url: string | URL, init?: RequestInit) => {
+        if (typeof init?.body === "string") {
+          try {
+            const parsed: unknown = JSON.parse(init.body);
+            const messages = Array.isArray(parsed) ? parsed : [parsed];
+            const initialize = messages.find(
+              (message): message is { params?: { protocolVersion?: string } } =>
+                typeof message === "object"
+                && message !== null
+                && (message as { method?: unknown }).method === "initialize",
+            );
+            sentProtocolVersion ??= initialize?.params?.protocolVersion;
+          } catch {
+            // Not a JSON-RPC POST body; ignore.
+          }
+        }
+        return handler.fetch(new Request(url, init));
+      },
+    },
+  );
+
+  const client = legacyClient();
+  await client.connect(transport);
+  try {
+    assert.equal(client.getProtocolEra(), "legacy");
+    assert.ok(
+      sentProtocolVersion,
+      "legacy initialize must carry params.protocolVersion",
+    );
+
+    const init = events().find((e) => e.kind === "session_init");
+    assert.ok(init, "legacy initialize records a session_init");
+    // The minted session id only carries name/version, so protocol_version
+    // must come from the initialize body itself — a null here is the
+    // legacy-leg attribution regression this covers.
+    assert.equal(init?.metadata.protocol_version, sentProtocolVersion);
+    assert.equal(init?.metadata.client_name, "v2-legacy-client");
+    assert.equal(init?.metadata.client_version, "1.0.0");
+  } finally {
+    await client.close();
+  }
+});
+
 test("v2 legacy era without wrapMcpHandler: documented SDK behavior — no session id, null hints, no crash", async () => {
   const { events, emit } = collectBatches();
   const handler = createMcpHandler(

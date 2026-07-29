@@ -1,11 +1,13 @@
-import type { McpAnalyticsConfig, McpClientInfo } from "./types.js";
+import type { McpAnalyticsConfig } from "./types.js";
 import {
   createAnalyticsRecorderCore,
   type AnalyticsRecorderCore,
 } from "./recorder-core.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
-import { resolveStatelessHttpSession } from "./stateless-http.js";
-import { isRecord } from "./utils.js";
+import {
+  clientInfoFromInitializeBody,
+  resolveStatelessHttpSession,
+} from "./stateless-http.js";
 
 // Session/client-identity shim for Vercel's `mcp-handler` (npm mcp-handler,
 // peer-pinned to @modelcontextprotocol/sdk@1.26.0). mcp-handler hands the
@@ -76,37 +78,6 @@ export const flushMcpHandlerAnalytics = (
   config?: McpAnalyticsConfig,
 ): Promise<void> => {
   return recorderStateFor(config).core.flush();
-};
-
-const trimOrUndefined = (value: unknown): string | undefined => {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-};
-
-// Full-fidelity clientInfo from the initialize body itself (name, version,
-// protocolVersion, capabilities) — richer than what the minted id can carry,
-// so the session_init recorded at initialize matches what a stateful v1
-// deployment would report.
-const clientInfoFromInitializeBody = (body: unknown): McpClientInfo | undefined => {
-  const messages = Array.isArray(body) ? body : [body];
-  const initialize = messages.find(
-    (message): message is Record<string, unknown> =>
-      isRecord(message) && message.method === "initialize",
-  );
-  const params = isRecord(initialize?.params) ? initialize.params : undefined;
-  if (!params) return undefined;
-  const info = isRecord(params.clientInfo) ? params.clientInfo : undefined;
-  const name = trimOrUndefined(info?.name);
-  if (name === undefined) return undefined;
-  const version = trimOrUndefined(info?.version);
-  const protocolVersion = trimOrUndefined(params.protocolVersion);
-  return {
-    name,
-    ...(version !== undefined ? { version } : {}),
-    ...(protocolVersion !== undefined ? { protocolVersion } : {}),
-    capabilities: isRecord(params.capabilities) ? params.capabilities : null,
-  };
 };
 
 const withSessionIdHeader = (response: Response, sessionId: string): Response => {

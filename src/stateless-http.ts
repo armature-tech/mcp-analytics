@@ -79,6 +79,34 @@ const clientInfoFromInitialize = (message: Record<string, unknown> | undefined):
   };
 };
 
+const trimOrUndefined = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
+// Full-fidelity clientInfo from the initialize body itself (name, version,
+// protocolVersion, capabilities) — richer than what the minted id can carry,
+// so the session_init recorded at initialize matches what a stateful v1
+// deployment would report. Shared by the stateless-handler wrappers
+// (withMcpHandlerAnalytics and the v2 wrapMcpHandler legacy leg).
+export const clientInfoFromInitializeBody = (body: unknown): McpClientInfo | undefined => {
+  const initialize = findInitializeMessage(body);
+  const params = initialize && isRecord(initialize.params) ? initialize.params : undefined;
+  if (!params) return undefined;
+  const info = isRecord(params.clientInfo) ? params.clientInfo : undefined;
+  const name = trimOrUndefined(info?.name);
+  if (name === undefined) return undefined;
+  const version = trimOrUndefined(info?.version);
+  const protocolVersion = trimOrUndefined(params.protocolVersion);
+  return {
+    name,
+    ...(version !== undefined ? { version } : {}),
+    ...(protocolVersion !== undefined ? { protocolVersion } : {}),
+    capabilities: isRecord(params.capabilities) ? params.capabilities : null,
+  };
+};
+
 export type StatelessHttpSession = {
   /** Stable session id: minted at initialize, parsed from the echoed header otherwise. */
   sessionId: string;
