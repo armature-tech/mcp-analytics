@@ -36,6 +36,7 @@ test("initialize requests mint an identity-bearing id and a generator for the tr
     headers: {},
   });
   assert.equal(session.isInitialize, true);
+  assert.ok(session.sessionId);
   assert.match(session.sessionId, /^mcp_cursor_v_1\.5_/);
   assert.equal(session.sessionIdGenerator?.(), session.sessionId);
   assert.deepEqual(session.dispatchContext, { sessionId: session.sessionId });
@@ -49,6 +50,7 @@ test("initialize inside a batch is detected", () => {
     ],
   });
   assert.equal(session.isInitialize, true);
+  assert.ok(session.sessionId);
   assert.match(session.sessionId, /^mcp_vscode_v__/);
 });
 
@@ -96,6 +98,7 @@ test("invalid session seeds never control the minted identifier", () => {
     body: { method: "initialize", params: { clientInfo: { name: "client" } } },
     headers: { "X-Armature-Session-Seed": "attacker-controlled" },
   });
+  assert.ok(session.sessionId);
   assert.match(session.sessionId, /^mcp_client_v__[0-9a-f-]{36}$/);
   assert.doesNotMatch(session.sessionId, /attacker/);
 });
@@ -124,14 +127,66 @@ test("tool-call requests recover identity from the echoed header (record and Hea
   assert.deepEqual(fromHeaders.clientInfo, { name: "claude-code", version: "2.0.13" });
 });
 
-test("tool-call requests without an echoed header fall back to a one-off session", () => {
+// Regression: minting a one-off UUID here produced one trusted hint per POST,
+// so ingest recorded a single-event session per tool call and its actor +
+// client grouping never ran.
+test("tool-call requests without an echoed header resolve to no session id", () => {
   const session = resolveStatelessHttpSession({
     body: { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "x" } },
     headers: {},
   });
   assert.equal(session.isInitialize, false);
-  assert.match(session.sessionId, /^[0-9a-f-]{36}$/);
+  assert.equal(session.sessionId, undefined);
   assert.equal(session.clientInfo, undefined);
+  assert.equal(session.sessionIdGenerator, undefined);
+  // Headers ride along so the recorder can tell "HTTP request with no session
+  // id" from "no HTTP request at all". Without them it would fall back to the
+  // process-scoped stdio id and merge every concurrent conversation in the
+  // server into one session.
+  assert.deepEqual(session.dispatchContext, { headers: {} });
+});
+
+test("two echo-less requests agree on no session id", () => {
+  const body = { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "x" } };
+  const first = resolveStatelessHttpSession({ body, headers: {} });
+  const second = resolveStatelessHttpSession({ body, headers: {} });
+  assert.equal(first.sessionId, undefined);
+  assert.equal(second.sessionId, undefined);
+});
+
+// The custom-transport integration from the README: the caller spreads
+// dispatchContext and nothing else. The event must carry no session hint, so
+// ingest groups it — NOT the process-scoped `stdio-` id, which would merge
+// every concurrent conversation in this process.
+test("echo-less dispatch context ships a null hint, not the stdio process id", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({
+    armature: {
+      delivery: "await",
+      actorId: "actor-seed",
+      emit: (batch) => {
+        batches.push(batch);
+      },
+    },
+  });
+
+  const session = resolveStatelessHttpSession({
+    body: { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "x" } },
+    headers: { "content-type": "application/json" },
+  });
+  await recorder.recordToolCall({
+    name: "lookup_customer",
+    args: {},
+    durationMs: 5,
+    status: "ok",
+    result: { content: [{ type: "text", text: "ok" }] },
+    ...session.dispatchContext,
+  });
+
+  const events = batches.flatMap((batch) => batch.events);
+  const toolCalls = events.filter((event) => event.kind === "tool_call");
+  assert.equal(toolCalls.length, 1);
+  assert.equal(toolCalls[0]?.session_id_hint, null);
 });
 
 test("recorder resolves client identity from identity-bearing session ids as a last resort", async () => {

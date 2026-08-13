@@ -837,7 +837,10 @@ export const wrapMcpHandler = <H extends V2McpHandlerLike>(
 
     const response = await originalFetch(request, ...rest);
 
-    if (session?.isInitialize && response.ok) {
+    // `sessionId` is always minted on initialize; the check narrows the type
+    // for the non-initialize case, where it is now optional.
+    if (session?.isInitialize && session.sessionId && response.ok) {
+      const mintedSessionId = session.sessionId;
       // Full-fidelity clientInfo from the initialize body: the minted id only
       // carries name/version, so without this the session_init would lose the
       // negotiated protocolVersion (and capabilities) — recorded here even
@@ -846,12 +849,12 @@ export const wrapMcpHandler = <H extends V2McpHandlerLike>(
       const clientInfo = clientInfoFromInitializeBody(body);
       try {
         await state.core.recordSessionInit({
-          sessionId: session.sessionId,
+          sessionId: mintedSessionId,
           headers: request.headers,
           ...(clientInfo !== undefined ? { clientInfo } : {}),
           ...(authInfo !== undefined ? { authInfo } : {}),
           extra: {
-            sessionId: session.sessionId,
+            sessionId: mintedSessionId,
             requestInfo: { headers: request.headers },
             ...(authInfo !== undefined ? { authInfo } : {}),
           },
@@ -859,7 +862,7 @@ export const wrapMcpHandler = <H extends V2McpHandlerLike>(
       } catch {
         // Recording is best-effort; never break the MCP response over it.
       }
-      return withSessionIdHeader(response, session.sessionId);
+      return withSessionIdHeader(response, mintedSessionId);
     }
 
     // Echo an id the legacy client is already carrying, so it keeps carrying it.

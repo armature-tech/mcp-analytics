@@ -135,21 +135,24 @@ export const withMcpHandlerAnalytics = <H extends McpRouteHandler>(
 
     const response = await handler(request, ...rest);
 
-    if (session?.isInitialize && response.ok) {
+    // `sessionId` is always minted on initialize; the check narrows the type
+    // for the non-initialize case, where it is now optional.
+    if (session?.isInitialize && session.sessionId && response.ok) {
+      const mintedSessionId = session.sessionId;
       try {
         await state.core.recordSessionInit({
-          sessionId: session.sessionId,
+          sessionId: mintedSessionId,
           headers: request.headers,
           clientInfo: clientInfoFromInitializeBody(body),
           extra: {
-            sessionId: session.sessionId,
+            sessionId: mintedSessionId,
             requestInfo: { headers: request.headers },
           },
         });
       } catch {
         // Recording is best-effort; never break the MCP response over it.
       }
-      return withSessionIdHeader(response, session.sessionId);
+      return withSessionIdHeader(response, mintedSessionId);
     }
 
     // Echo an id the client is already carrying, so it keeps carrying it.

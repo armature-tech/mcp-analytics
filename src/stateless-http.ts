@@ -108,8 +108,12 @@ export const clientInfoFromInitializeBody = (body: unknown): McpClientInfo | und
 };
 
 export type StatelessHttpSession = {
-  /** Stable session id: minted at initialize, parsed from the echoed header otherwise. */
-  sessionId: string;
+  /**
+   * Stable session id: minted at initialize, parsed from the echoed header
+   * otherwise. Undefined when the request carries neither — see
+   * `resolveStatelessHttpSession`.
+   */
+  sessionId?: string;
   /** Client identity recovered from the echoed session id (tool-call requests only). */
   clientInfo?: McpClientInfo;
   /**
@@ -120,8 +124,17 @@ export type StatelessHttpSession = {
   sessionIdGenerator?: () => string;
   /** True when the request (or any message in a batch) is `initialize`. */
   isInitialize: boolean;
-  /** Spread into `dispatch(name, args, { ctx, ...dispatchContext })`. */
-  dispatchContext: { sessionId: string; clientInfo?: McpClientInfo };
+  /**
+   * Spread into `dispatch(name, args, { ctx, ...dispatchContext })`.
+   *
+   * When there is no session id the request headers ride along instead. The
+   * recorder reads "no session id AND no headers" as "no HTTP request at
+   * all" and falls back to the process-scoped stdio id, which would merge
+   * every concurrent conversation in a long-lived server into one session.
+   * Passing the headers keeps the request identifiable as HTTP-with-no-id,
+   * so the event ships a null hint and ingest groups it.
+   */
+  dispatchContext: { sessionId?: string; clientInfo?: McpClientInfo; headers?: HeaderBag };
 };
 
 export const resolveStatelessHttpSession = (input: {
@@ -144,8 +157,20 @@ export const resolveStatelessHttpSession = (input: {
       dispatchContext: { sessionId },
     };
   }
-  const echoed = headerValue(input.headers, "mcp-session-id");
-  const sessionId = echoed?.trim() || randomUUID();
+  const sessionId = headerValue(input.headers, "mcp-session-id")?.trim();
+  if (!sessionId) {
+    // No initialize to mint from and no echo to recover: either modern-era
+    // traffic (identified through `_meta` / the session seed) or a client
+    // that drops the header. Minting here would stamp a distinct id on every
+    // POST, and ingest trusts an explicit hint, so each tool call would land
+    // in its own single-event session. Reporting no id ships
+    // `session_id_hint: null` and lets ingest group by actor + client with
+    // its inactivity window instead. Matches the Go SDK's empty session id.
+    return {
+      isInitialize: false,
+      dispatchContext: input.headers ? { headers: input.headers } : {},
+    };
+  }
   const clientInfo = parseStatelessSessionClientInfo(sessionId);
   return {
     sessionId,
