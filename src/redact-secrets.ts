@@ -20,6 +20,11 @@ export const SECRET_PATTERN_RULES: readonly SecretPatternRule[] = [
     replacement: "$1$2[redacted:sensitive-kv]",
   },
   {
+    id: "aws-secret-access-key",
+    pattern: /(secret[ _-]?access[ _-]?key["']?[ \t]*[=:][ \t]*["']?)[A-Za-z0-9/+]{40,}/gi,
+    replacement: "$1[redacted:aws-secret-access-key]",
+  },
+  {
     id: "aws-access-key-id",
     pattern: /\b(?:AKIA|ASIA|ABIA|ACCA|AGPA|AIDA|AIPA|ANPA|ANVA|AROA)[A-Z0-9]{16}\b/g,
     replacement: "[redacted:aws-access-key-id]",

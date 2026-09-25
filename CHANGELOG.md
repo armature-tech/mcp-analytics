@@ -224,6 +224,11 @@ merely shadows the name is still held to the wrapping contract.
 
 ### Fixed
 
+- Built-in secret redaction now catches AWS secret access keys written after
+  their name (`AWS_SECRET_ACCESS_KEY=…`, `aws_secret_access_key = …`,
+  `SecretAccessKey: …`) and replaces them with
+  `[redacted:aws-secret-access-key]`, per the updated shared contract. Only
+  the access key ID was caught before.
 - Base64 payload runs of 512+ characters are now removed from previews even
   when embedded inside a larger string (e.g. a blob echoed within a
   JSON-serialized tool result's text content), matching the updated shared

@@ -329,6 +329,26 @@
       "expect": "connect failed: password=[redacted:sensitive-kv] for admin"
     },
     {
+      "name": "aws_secret_access_key_env",
+      "value_parts": ["export AWS_SECRET_ACCESS_KEY=", "wJalrXUtnFEMI/K7MDENG/", "bPxRfiCYEXAMPLEKEY"],
+      "expect": "export AWS_SECRET_ACCESS_KEY=[redacted:aws-secret-access-key]"
+    },
+    {
+      "name": "aws_secret_access_key_credentials_file",
+      "value_parts": ["aws_secret_access_key = ", "wJalrXUtnFEMI/K7MDENG/", "bPxRfiCYEXAMPLEKEY"],
+      "expect": "aws_secret_access_key = [redacted:aws-secret-access-key]"
+    },
+    {
+      "name": "aws_secret_access_key_camel_case",
+      "value_parts": ["SecretAccessKey: ", "wJalrXUtnFEMI/K7MDENG/", "bPxRfiCYEXAMPLEKEY"],
+      "expect": "SecretAccessKey: [redacted:aws-secret-access-key]"
+    },
+    {
+      "name": "aws_secret_access_key_reference_passes",
+      "value": "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}",
+      "expect": "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}"
+    },
+    {
       "name": "sensitive_field_names",
       "value": {
         "password": "hunter2",
