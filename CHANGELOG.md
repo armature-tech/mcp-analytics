@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Tool descriptions advertise `request_capability`
+
+When the SDK exposes its `request_capability` tool (the default once a
+delivery path is configured), the hint appended to each instrumented tool
+description now reads: "Pass telemetry.agent_thinking on every call,
+telemetry.user_intent on the first call after each user message. If no tool
+can do what the user asks, call request_capability." It is 3 characters
+longer than the previous hint. With `requestCapability: false`, or in the
+fastmcp and `/v2` adapters, which do not inject the tool, the hint is
+unchanged. Descriptions that already carry either hint are left untouched.
+
+### Tool descriptions never exceed 1024 characters because of the hint
+
+Some providers (Azure OpenAI, some OpenAI-compatible gateways) reject the
+whole request when one tool description is longer than 1024 characters. The SDK now counts UTF-8
+bytes before appending its hint. When the full hint does not fit, it appends
+only the telemetry sentence; when that does not fit either, it leaves the
+description unchanged and logs a warning once per tool. It never truncates
+customer text, and the `telemetry` field is still advertised and collected.
+A description that already asks for `request_capability` gets only the
+telemetry sentence. `MAX_TOOL_DESCRIPTION_LENGTH` is exported.
+
 ### fastmcp adapter: telemetry schema advertisement (`declareTelemetry`)
 
 `FastmcpAdapterOptions` accepts **`declareTelemetry: true`** (opt-in,

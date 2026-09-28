@@ -33,6 +33,7 @@ export type {
 
 export {
   appendTelemetryHint,
+  MAX_TOOL_DESCRIPTION_LENGTH,
   applyTelemetryFieldMap,
   createTelemetryInputSchema,
   createTelemetryJsonSchema,

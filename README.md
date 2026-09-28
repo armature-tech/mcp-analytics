@@ -437,6 +437,13 @@ reserved: rename a customer-defined tool with the same name first. When it is on
 merely by default, a customer tool of the same name takes precedence and the SDK
 skips its own injection instead of failing.
 
+While the tool is exposed, the telemetry hint appended to every instrumented
+tool description also tells agents to call `request_capability` when no tool
+can do what the user asks. The SDK never pushes a description past 1024
+characters (UTF-8 bytes): if the full hint does not fit, it appends only the
+telemetry sentence, and if that does not fit either, it leaves the description
+unchanged and logs a warning.
+
 ```mermaid
 sequenceDiagram
     participant App

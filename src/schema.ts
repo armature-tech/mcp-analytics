@@ -8,6 +8,7 @@ import type {
   TelemetryFieldMap,
   TelemetryMode,
 } from "./types.js";
+import { isRequestCapabilityEnabled } from "./request-capability.js";
 import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
 
 // V1 telemetry wording. These strings are the cross-language contract: the
@@ -20,33 +21,101 @@ export const TELEMETRY_PROPERTY_DESCRIPTION =
 const TELEMETRY_DESCRIPTION_HINT =
   "\n\nOn every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.";
 const TELEMETRY_DESCRIPTION_HINT_MARKER = TELEMETRY_DESCRIPTION_HINT.trim();
+// Emitted instead of the hint above when the SDK-owned request_capability tool
+// is exposed, so agents learn the tool exists. It is two sentences so a long
+// description can keep the telemetry one alone (see appendTelemetryHint).
+const TELEMETRY_SENTENCE =
+  "Pass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message.";
+const REQUEST_CAPABILITY_SENTENCE =
+  "If no tool can do what the user asks, call request_capability.";
+const TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY =
+  `\n\n${TELEMETRY_SENTENCE} ${REQUEST_CAPABILITY_SENTENCE}`;
+const TELEMETRY_SENTENCE_HINT = `\n\n${TELEMETRY_SENTENCE}`;
 // Older hints are recognized (never emitted) so a description that reached us
 // through an earlier wrapper doesn't accumulate a second, mixed-generation
-// nudge. Same markers in the Python and Go SDKs.
+// nudge. Same markers in the Python, Go, and PHP SDKs.
 const TELEMETRY_DESCRIPTION_HINT_REPEAT_INTENT_MARKER =
   "Pass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.";
 const TELEMETRY_DESCRIPTION_HINT_V1_MARKER =
   "Pass telemetry.user_intent with a one-line restatement of the user's most recent request.";
 const TELEMETRY_DESCRIPTION_HINT_LEGACY_MARKER =
   "Pass telemetry.intent with a one-line user intent for analytics.";
+const RECOGNIZED_HINT_MARKERS = [
+  TELEMETRY_DESCRIPTION_HINT_MARKER,
+  // Also covers the request_capability hint, which starts with it.
+  TELEMETRY_SENTENCE,
+  TELEMETRY_DESCRIPTION_HINT_REPEAT_INTENT_MARKER,
+  TELEMETRY_DESCRIPTION_HINT_V1_MARKER,
+  TELEMETRY_DESCRIPTION_HINT_LEGACY_MARKER,
+];
 
-// Appends the telemetry.user_intent nudge to a tool description (idempotently —
-// a description that already carries the hint, either generation, passes
-// through unchanged). Every integration shape must run tool descriptions
-// through this so calling agents know to pass telemetry.user_intent (ARM-24).
-export const appendTelemetryHint = (description: string | undefined) => {
+// Some providers reject the whole request when any tool description exceeds
+// 1024 characters (Azure OpenAI, some OpenAI-compatible gateways), and Claude
+// Code cuts descriptions at 2048, which would drop the hint first. Measured in
+// UTF-8 bytes, which never undercounts characters and matches the Python, Go,
+// and PHP SDKs exactly.
+export const MAX_TOOL_DESCRIPTION_LENGTH = 1024;
+const utf8 = new TextEncoder();
+const fits = (text: string) => utf8.encode(text).length <= MAX_TOOL_DESCRIPTION_LENGTH;
+
+const warnedLongDescriptions = new Set<string>();
+const warnDescriptionTooLong = (toolName: string, message: string) => {
+  if (warnedLongDescriptions.has(toolName)) return;
+  warnedLongDescriptions.add(toolName);
+  // eslint-disable-next-line no-console
+  console.warn(`[mcp-analytics] Tool "${toolName}" description is too long ${message}`);
+};
+
+// Appends the telemetry nudge to a tool description (idempotently — a
+// description that already carries a hint of any generation passes through
+// unchanged). Every integration shape must run tool descriptions through this
+// so calling agents know to pass telemetry (ARM-24). With `requestCapability`,
+// the hint also points agents to request_capability.
+//
+// The result never exceeds MAX_TOOL_DESCRIPTION_LENGTH because of us: when the
+// full hint does not fit, only the telemetry sentence is appended (it matters
+// per tool; request_capability is a list-wide instruction other tools carry);
+// when that does not fit either, the description is left unchanged. Sentences
+// are never cut, and the telemetry field is still advertised either way.
+export const appendTelemetryHint = (
+  description: string | undefined,
+  options: { requestCapability?: boolean; toolName?: string } = {},
+) => {
+  const requestCapability = options.requestCapability === true;
   if (description === undefined) {
-    return TELEMETRY_DESCRIPTION_HINT.trimStart();
+    return (requestCapability
+      ? TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY
+      : TELEMETRY_DESCRIPTION_HINT).trimStart();
   }
-  if (
-    description.includes(TELEMETRY_DESCRIPTION_HINT_MARKER)
-    || description.includes(TELEMETRY_DESCRIPTION_HINT_REPEAT_INTENT_MARKER)
-    || description.includes(TELEMETRY_DESCRIPTION_HINT_V1_MARKER)
-    || description.includes(TELEMETRY_DESCRIPTION_HINT_LEGACY_MARKER)
-  ) {
+  if (RECOGNIZED_HINT_MARKERS.some((marker) => description.includes(marker))) {
     return description;
   }
-  return `${description}${TELEMETRY_DESCRIPTION_HINT}`;
+  // A customer who already wrote the request_capability sentence gets only the
+  // telemetry one, so the instruction is not repeated.
+  const hint = !requestCapability
+    ? TELEMETRY_DESCRIPTION_HINT
+    : description.includes(REQUEST_CAPABILITY_SENTENCE)
+      ? TELEMETRY_SENTENCE_HINT
+      : TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY;
+  if (fits(`${description}${hint}`)) {
+    return `${description}${hint}`;
+  }
+  if (fits(`${description}${TELEMETRY_SENTENCE_HINT}`)) {
+    if (options.toolName !== undefined) {
+      warnDescriptionTooLong(
+        options.toolName,
+        `for the full Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; appended only the telemetry sentence.`,
+      );
+    }
+    return `${description}${TELEMETRY_SENTENCE_HINT}`;
+  }
+  if (options.toolName !== undefined) {
+    warnDescriptionTooLong(
+      options.toolName,
+      `to append the Armature telemetry hint without exceeding ${MAX_TOOL_DESCRIPTION_LENGTH} characters; leaving it unchanged. Telemetry is still collected.`,
+    );
+  }
+  return description;
 };
 export const USER_INTENT_DESCRIPTION =
   "What the user asked for in their most recent message, restated in one line. Include this field only on the first tool call after each new user message; omit it on subsequent calls until the user speaks again. If a new message preserves the same goal, repeat the same intent once. Stay faithful to the user's words; do not describe your plan. Omit argument values, PII, and secrets. Use English.";
@@ -174,7 +243,8 @@ export type ToolTelemetryPlan = {
   // Decorated schema for "injected"; the caller's original schema (possibly
   // undefined) for "owned" and "scrub".
   inputSchema: unknown;
-  // appendTelemetryHint for "injected"; identity otherwise, so tools we do not
+  // appendTelemetryHint for "injected" (naming request_capability when the SDK
+  // exposes it); identity otherwise, so tools we do not
   // collect telemetry for never advertise a telemetry contract.
   applyDescription: (description: string | undefined) => string | undefined;
 };
@@ -184,10 +254,14 @@ export type ToolTelemetryPlan = {
 // prototype patch, Mastra adapter, custom dispatchers) must register and
 // extract with the same plan, so the advertised schema always matches runtime
 // behavior.
+// `requestCapability` overrides the config-derived answer to "does this
+// server list request_capability?" for adapters whose recorder, not the
+// wrap-time config, is the source of truth (Mastra).
 export const planToolTelemetry = (
   toolName: string,
   inputSchema: unknown,
   config: InternalMcpAnalyticsConfig = {},
+  options: { requestCapability?: boolean } = {},
 ): ToolTelemetryPlan => {
   if (schemaDeclaresTelemetry(inputSchema)) {
     warnTelemetryCollision(toolName);
@@ -207,7 +281,11 @@ export const planToolTelemetry = (
   return {
     mode: "injected",
     inputSchema: decorateInputSchemaWithTelemetry(inputSchema, config),
-    applyDescription: appendTelemetryHint,
+    applyDescription: (description) =>
+      appendTelemetryHint(description, {
+        requestCapability: options.requestCapability ?? isRequestCapabilityEnabled(config),
+        toolName,
+      }),
   };
 };
 

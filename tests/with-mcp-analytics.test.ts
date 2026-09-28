@@ -18,6 +18,9 @@ import {
 
 const TELEMETRY_DESCRIPTION_HINT =
   "On every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.";
+// Emitted instead when the SDK exposes request_capability (delivery configured).
+const TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY =
+  "Pass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message. If no tool can do what the user asks, call request_capability.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];
@@ -71,7 +74,7 @@ test("withMcpAnalytics instruments server.registerTool calls end-to-end", async 
     // The LLM nudges (ARM-24) must reach the wire in this path too.
     assert.equal(
       listed.tools[0]?.description,
-      `Look up a customer.\n\n${TELEMETRY_DESCRIPTION_HINT}`,
+      `Look up a customer.\n\n${TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY}`,
     );
     assert.equal(
       (schema.properties?.telemetry as JsonObjectSchema).description,

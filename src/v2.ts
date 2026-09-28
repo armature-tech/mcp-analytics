@@ -598,7 +598,7 @@ const instrumentRegisteredTool = (
       ? {
           paramsSchema: decoratedSchema,
           // Same idempotent description nudge as v1 (ARM-24).
-          description: appendTelemetryHint(registered.description),
+          description: appendTelemetryHint(registered.description, { toolName: name }),
         }
       : {}),
     callback: wrapToolCallback(

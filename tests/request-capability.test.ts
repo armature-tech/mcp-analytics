@@ -14,6 +14,12 @@ import {
   REQUEST_CAPABILITY_DESCRIPTION,
   REQUEST_CAPABILITY_TOOL_NAME,
 } from "../src/request-capability.js";
+import { appendTelemetryHint, MAX_TOOL_DESCRIPTION_LENGTH } from "../src/schema.js";
+
+const TELEMETRY_DESCRIPTION_HINT =
+  "\n\nOn every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.";
+const TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY =
+  "\n\nPass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message. If no tool can do what the user asks, call request_capability.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];
@@ -264,5 +270,181 @@ test("Mastra adapter injects request_capability when enabled", async () => {
     batches.flatMap((batch) => batch.events)
       .some((event) => event.metadata.tool_name === REQUEST_CAPABILITY_TOOL_NAME),
     true,
+  );
+});
+
+test("the per-tool hint points agents to request_capability only when the SDK exposes it", () => {
+  const definition = {
+    name: "lookup_customer",
+    description: "Look up a customer.",
+    inputSchema: { type: "object", properties: {} },
+  };
+  const enabled = createAnalyticsRecorder({ armature: { emit: () => undefined } })
+    .decorateDefinitions([definition])[0];
+  assert.equal(
+    enabled?.description,
+    `Look up a customer.${TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY}`,
+  );
+  const disabled = createAnalyticsRecorder({
+    armature: { emit: () => undefined, requestCapability: false },
+  }).decorateDefinitions([definition])[0];
+  assert.equal(disabled?.description, `Look up a customer.${TELEMETRY_DESCRIPTION_HINT}`);
+  // The new hint keeps the old length budget (clients cap descriptions at 1024).
+  assert.ok(
+    TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY.length
+      <= TELEMETRY_DESCRIPTION_HINT.length + 3,
+  );
+});
+
+test("appendTelemetryHint never stacks a second hint of either kind", () => {
+  const withNew = `Look up a customer.${TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY}`;
+  const withOld = `Look up a customer.${TELEMETRY_DESCRIPTION_HINT}`;
+  for (const requestCapability of [true, false]) {
+    assert.equal(appendTelemetryHint(withNew, { requestCapability }), withNew);
+    assert.equal(appendTelemetryHint(withOld, { requestCapability }), withOld);
+  }
+  assert.equal(
+    appendTelemetryHint(undefined, { requestCapability: true }),
+    TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY.trimStart(),
+  );
+  assert.equal(appendTelemetryHint(undefined), TELEMETRY_DESCRIPTION_HINT.trimStart());
+});
+
+test("McpServer tools/list carries the request_capability hint next to the SDK tool", async () => {
+  const { result: server } = withMcpAnalytics(
+    { armature: { emit: () => undefined } },
+    () => {
+      const s = new McpServer({ name: "hint-server", version: "0.0.1" });
+      s.registerTool(
+        "lookup_customer",
+        { description: "Look up a customer." },
+        async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+      );
+      return s;
+    },
+  );
+  const client = new Client({ name: "hint-client", version: "0.0.1" });
+  const [st, ct] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  try {
+    const { tools } = await client.listTools();
+    const byName = new Map(tools.map((tool) => [tool.name, tool]));
+    assert.equal(
+      byName.get("lookup_customer")?.description,
+      `Look up a customer.${TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY}`,
+    );
+    // The SDK-owned tool itself stays undecorated.
+    assert.equal(
+      byName.get(REQUEST_CAPABILITY_TOOL_NAME)?.description,
+      REQUEST_CAPABILITY_DESCRIPTION,
+    );
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+const TELEMETRY_SENTENCE_HINT =
+  "\n\nPass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message.";
+const REQUEST_CAPABILITY_SENTENCE =
+  "If no tool can do what the user asks, call request_capability.";
+
+test("a long description gets the full hint, then the telemetry sentence, then nothing", () => {
+  for (const [requestCapability, hint] of [
+    [true, TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY],
+    [false, TELEMETRY_DESCRIPTION_HINT],
+  ] as const) {
+    const fullFits = "a".repeat(MAX_TOOL_DESCRIPTION_LENGTH - hint.length);
+    assert.equal(appendTelemetryHint(fullFits, { requestCapability }), `${fullFits}${hint}`);
+    const sentenceOnly = `${fullFits}a`;
+    assert.equal(
+      appendTelemetryHint(sentenceOnly, { requestCapability }),
+      `${sentenceOnly}${TELEMETRY_SENTENCE_HINT}`,
+    );
+    const sentenceFits = "a".repeat(MAX_TOOL_DESCRIPTION_LENGTH - TELEMETRY_SENTENCE_HINT.length);
+    assert.equal(
+      appendTelemetryHint(sentenceFits, { requestCapability })?.length,
+      MAX_TOOL_DESCRIPTION_LENGTH,
+    );
+    const nothingFits = `${sentenceFits}a`;
+    assert.equal(appendTelemetryHint(nothingFits, { requestCapability }), nothingFits);
+  }
+  // Length is counted in UTF-8 bytes: "é" is one character but two bytes.
+  const accented = "é".repeat(440); // 440 characters, 880 bytes
+  assert.ok(accented.length + TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY.length <= MAX_TOOL_DESCRIPTION_LENGTH);
+  assert.equal(
+    appendTelemetryHint(accented, { requestCapability: true }),
+    `${accented}${TELEMETRY_SENTENCE_HINT}`,
+  );
+});
+
+test("hinting is idempotent, including after a telemetry-sentence-only fallback", () => {
+  for (const length of [10, 900, 950, 1000]) {
+    const once = appendTelemetryHint("a".repeat(length), { requestCapability: true });
+    assert.equal(appendTelemetryHint(once, { requestCapability: true }), once);
+    assert.equal(appendTelemetryHint(once, { requestCapability: false }), once);
+  }
+});
+
+test("a description that already asks for request_capability only gets the telemetry sentence", () => {
+  const description = `Look up a customer. ${REQUEST_CAPABILITY_SENTENCE}`;
+  assert.equal(
+    appendTelemetryHint(description, { requestCapability: true }),
+    `${description}${TELEMETRY_SENTENCE_HINT}`,
+  );
+});
+
+test("a too-long description keeps its telemetry field and warns once per tool", () => {
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (message?: unknown) => {
+    warnings.push(String(message));
+  };
+  try {
+    const recorder = createAnalyticsRecorder({ armature: { emit: () => undefined } });
+    const tooLong = {
+      name: "long_description_tool",
+      description: "x".repeat(MAX_TOOL_DESCRIPTION_LENGTH - 10),
+      inputSchema: { type: "object", properties: {} },
+    };
+    const shortened = {
+      name: "shortened_hint_tool",
+      description: "y".repeat(MAX_TOOL_DESCRIPTION_LENGTH - 150),
+      inputSchema: { type: "object", properties: {} },
+    };
+    const [decorated, partial] = recorder.decorateDefinitions([tooLong, shortened]);
+    recorder.decorateDefinitions([tooLong, shortened]);
+    assert.equal(decorated?.description, tooLong.description);
+    assert.equal(partial?.description, `${shortened.description}${TELEMETRY_SENTENCE_HINT}`);
+    assert.ok(
+      (decorated?.inputSchema as JsonObjectSchema).properties?.telemetry,
+      "telemetry is still advertised",
+    );
+    assert.deepEqual(warnings, [
+      `[mcp-analytics] Tool "long_description_tool" description is too long to append the Armature telemetry hint without exceeding ${MAX_TOOL_DESCRIPTION_LENGTH} characters; leaving it unchanged. Telemetry is still collected.`,
+      `[mcp-analytics] Tool "shortened_hint_tool" description is too long for the full Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; appended only the telemetry sentence.`,
+    ]);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("Mastra tools name request_capability when the recorder has it, whatever the wrap-time config", async () => {
+  const recorder = createAnalyticsRecorder({ armature: { emit: () => undefined } });
+  const wrapped = wrapMastraToolsWithRecorder(
+    {
+      lookup_customer: {
+        id: "lookup_customer",
+        description: "Look up a customer.",
+        execute: async () => "ok",
+      },
+    },
+    recorder,
+    { armature: { apiKey: "" } },
+  );
+  assert.ok(wrapped[REQUEST_CAPABILITY_TOOL_NAME]);
+  assert.equal(
+    wrapped.lookup_customer?.description,
+    `Look up a customer.${TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY}`,
   );
 });

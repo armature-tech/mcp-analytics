@@ -134,6 +134,7 @@ const wrapOneTool = (
   recorder: AnalyticsRecorder,
   config: InternalMcpAnalyticsConfig,
   resolveExtra?: (mastraContext: unknown) => RequestExtra | undefined,
+  requestCapability?: boolean,
 ): MastraTool => {
   if (typeof tool?.execute !== "function") {
     return tool;
@@ -144,7 +145,7 @@ const wrapOneTool = (
   // Mastra tools without an inputSchema keep no schema (Mastra derives its own
   // default); planToolTelemetry is only consulted for decoration when the tool
   // has one, but its mode still drives extraction either way.
-  const plan = planToolTelemetry(toolName, tool.inputSchema, config);
+  const plan = planToolTelemetry(toolName, tool.inputSchema, config, { requestCapability });
   const decoratedInputSchema =
     tool.inputSchema === undefined ? undefined : plan.inputSchema;
 
@@ -222,7 +223,16 @@ export const wrapMastraToolsWithRecorder = <T extends MastraToolMap>(
     );
   }
   for (const [key, tool] of Object.entries(tools)) {
-    out[key] = wrapOneTool(key, tool, recorder, config, options.resolveExtra);
+    // Same recorder-derived answer for the hint, so it names request_capability
+    // exactly when the returned map carries one (ours or the customer's).
+    out[key] = wrapOneTool(
+      key,
+      tool,
+      recorder,
+      config,
+      options.resolveExtra,
+      requestCapabilityEnabled,
+    );
   }
   if (requestCapabilityEnabled && !requestCapabilityCollision) {
     out[REQUEST_CAPABILITY_TOOL_NAME] = {
