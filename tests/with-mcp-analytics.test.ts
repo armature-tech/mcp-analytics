@@ -20,7 +20,7 @@ const TELEMETRY_DESCRIPTION_HINT =
   "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
 // Emitted instead when the SDK exposes request_capability (delivery configured).
 const TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY =
-  "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message. If no tool can do what the user asks, call request_capability.";
+  "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message. Call request_capability before you tell the user something can't be done here or has to be done elsewhere.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];

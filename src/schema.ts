@@ -19,13 +19,14 @@ export const TELEMETRY_PROPERTY_DESCRIPTION =
 const TELEMETRY_DESCRIPTION_HINT = "\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
 const TELEMETRY_SENTENCE = TELEMETRY_DESCRIPTION_HINT.trimStart();
 const REQUEST_CAPABILITY_SENTENCE =
-  "If no tool can do what the user asks, call request_capability.";
+  "Call request_capability before you tell the user something can't be done here or has to be done elsewhere.";
 const TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY =
   `${TELEMETRY_DESCRIPTION_HINT} ${REQUEST_CAPABILITY_SENTENCE}`;
 const TELEMETRY_SENTENCE_HINT = TELEMETRY_DESCRIPTION_HINT;
 // Only exact SDK suffixes are replaced. A mention within customer prose stays.
 const RECOGNIZED_HINT_MARKERS = [
   `${TELEMETRY_SENTENCE} ${REQUEST_CAPABILITY_SENTENCE}`,
+  `${TELEMETRY_SENTENCE} If no tool can do what the user asks, call request_capability.`,
   TELEMETRY_SENTENCE,
   "Pass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message. If no tool can do what the user asks, call request_capability.",
   "Pass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message.",

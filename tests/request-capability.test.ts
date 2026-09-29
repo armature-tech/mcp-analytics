@@ -19,7 +19,7 @@ import { appendTelemetryHint, withoutRequestCapabilityHint, MAX_TOOL_DESCRIPTION
 const TELEMETRY_DESCRIPTION_HINT =
   "\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
 const TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY =
-  "\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message. If no tool can do what the user asks, call request_capability.";
+  "\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message. Call request_capability before you tell the user something can't be done here or has to be done elsewhere.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];
@@ -551,6 +551,8 @@ test("old SDK suffixes are upgraded without changing customer prose", () => {
     "Pass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.",
     "Pass telemetry.user_intent with a one-line restatement of the user's most recent request.",
     "Pass telemetry.intent with a one-line user intent for analytics.",
+    // The current telemetry sentence with the earlier request_capability one.
+    `${TELEMETRY_DESCRIPTION_HINT.trimStart()} If no tool can do what the user asks, call request_capability.`,
   ];
   for (const hint of legacy) {
     const migrated = appendTelemetryHint(`Customer text.\n\n${hint}`, { requestCapability: true });
@@ -604,7 +606,7 @@ test("McpServer tools/list carries the request_capability hint next to the SDK t
 const TELEMETRY_SENTENCE_HINT =
   "\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
 const REQUEST_CAPABILITY_SENTENCE =
-  "If no tool can do what the user asks, call request_capability.";
+  "Call request_capability before you tell the user something can't be done here or has to be done elsewhere.";
 
 test("a long description gets the full hint, then the telemetry sentence, then nothing", () => {
   for (const [requestCapability, hint] of [
