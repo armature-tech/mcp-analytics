@@ -11,19 +11,60 @@ import type {
   WithMcpAnalyticsResult,
 } from "./types.js";
 import { createAnalyticsRecorder } from "./recorder.js";
-import { planToolTelemetry } from "./schema.js";
+import {
+  appendTelemetryHint,
+  planToolTelemetry,
+  withoutRequestCapabilityHint,
+} from "./schema.js";
 import type { TelemetryMode } from "./types.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
 import { deriveToolResultError, isRecord } from "./utils.js";
-import { isRequestCapabilityEnabled, isRequestCapabilityExplicit } from "./request-capability.js";
+import {
+  isRequestCapabilityEnabled,
+  isRequestCapabilityExplicit,
+  REQUEST_CAPABILITY_TOOL_NAME,
+} from "./request-capability.js";
 
 type WithAnalyticsContext = {
   config: McpAnalyticsConfig;
   recorder: AnalyticsRecorder;
+  // Set once the factory returns and the SDK-owned tool is attached (or not).
+  // Callbacks the factory scheduled keep this context, so later registrations
+  // check their own server directly.
+  resolved: boolean;
+  // Tools registered while the factory ran whose hint names
+  // request_capability, with the description they get if their server ends
+  // up not listing it.
+  requestCapabilityHints: Array<{
+    server: McpServer;
+    tool: unknown;
+    toolName: string;
+    // What we registered; a different value later means the factory updated it.
+    hintedDescription: string | undefined;
+    fallbackDescription: string | undefined;
+  }>;
 };
 
 const withAnalyticsStorage = new AsyncLocalStorage<WithAnalyticsContext>();
 let prototypePatchInstalled = false;
+
+// Servers a tool named request_capability was registered on: the SDK-owned
+// one the recorder attaches, or a customer's own. Only the fallback for an
+// SDK build without the tool registry below.
+const serversListingRequestCapability = new WeakSet<McpServer>();
+
+// Whether tools/list on `server` currently carries request_capability. Reads
+// the SDK's registry (the same map and `enabled` filter tools/list uses), so
+// a tool removed or disabled after registration no longer counts.
+const listsRequestCapability = (server: McpServer) => {
+  const registry = (server as unknown as {
+    _registeredTools?: Record<string, { enabled?: boolean } | undefined>;
+  })._registeredTools;
+  if (registry !== null && typeof registry === "object") {
+    return registry[REQUEST_CAPABILITY_TOOL_NAME]?.enabled === true;
+  }
+  return serversListingRequestCapability.has(server);
+};
 
 // Mirrors the SDK's `isZodTypeLike`/`isZodRawShapeCompat` checks closely enough
 // to disambiguate the overloads of `server.tool(...)`: a raw shape is a plain
@@ -162,12 +203,21 @@ const installPrototypePatchOnce = () => {
   ) {
     const ctx = withAnalyticsStorage.getStore();
     if (!ctx) {
-      return originalRegisterTool.call(this, name, toolConfig, cb);
+      const registered = originalRegisterTool.call(this, name, toolConfig, cb);
+      if (name === REQUEST_CAPABILITY_TOOL_NAME) serversListingRequestCapability.add(this);
+      return registered;
     }
 
     const { config } = ctx;
     const originalHasInputSchema = toolConfig.inputSchema !== undefined;
-    const plan = planToolTelemetry(name, toolConfig.inputSchema, config);
+    const plan = planToolTelemetry(
+      name,
+      toolConfig.inputSchema,
+      config,
+      ctx.resolved
+        ? { requestCapability: listsRequestCapability(this) }
+        : {},
+    );
     const registeredHasInputSchema = plan.inputSchema !== undefined;
     const description = plan.applyDescription(toolConfig.description);
     const instrumentedConfig = {
@@ -184,12 +234,25 @@ const installPrototypePatchOnce = () => {
       ctx,
     );
 
-    return originalRegisterTool.call(
+    const registered = originalRegisterTool.call(
       this,
       name,
       instrumentedConfig,
       wrappedCallback,
     );
+    if (name === REQUEST_CAPABILITY_TOOL_NAME) serversListingRequestCapability.add(this);
+    if (!ctx.resolved && plan.mode === "injected" && isRequestCapabilityEnabled(config)) {
+      ctx.requestCapabilityHints.push({
+        server: this,
+        tool: registered,
+        toolName: name,
+        hintedDescription: description,
+        fallbackDescription: appendTelemetryHint(toolConfig.description, {
+          toolName: name,
+        }),
+      });
+    }
+    return registered;
   };
 
   // PRIA and other older codebases still use the deprecated `server.tool(...)`
@@ -225,10 +288,13 @@ export const withMcpAnalytics = <ServerFactoryResult>(
 ): WithMcpAnalyticsResult<ServerFactoryResult> => {
   const recorder = createAnalyticsRecorder(config);
   installPrototypePatchOnce();
-  const result = withAnalyticsStorage.run(
-    { config, recorder },
-    createServer,
-  );
+  const ctx: WithAnalyticsContext = {
+    config,
+    recorder,
+    resolved: false,
+    requestCapabilityHints: [],
+  };
+  const result = withAnalyticsStorage.run(ctx, createServer);
   // Customer tools registered inside the factory are handled by the
   // prototype patch above. The opt-in SDK-owned tool lives in the recorder's
   // private registry, so attach only after leaving AsyncLocalStorage: this
@@ -260,6 +326,25 @@ export const withMcpAnalytics = <ServerFactoryResult>(
       if (!collision) throw error;
     }
   }
+  // Tools registered on a server that does not list request_capability (the
+  // factory returned something else, or registered on another server) must
+  // not point agents at it.
+  ctx.resolved = true;
+  for (const hint of ctx.requestCapabilityHints) {
+    if (
+      !listsRequestCapability(hint.server)
+      && hint.tool !== null
+      && typeof hint.tool === "object"
+    ) {
+      const tool = hint.tool as { description?: string };
+      // Keep a description the factory updated after registration; only its
+      // hint changes.
+      tool.description = tool.description === hint.hintedDescription
+        ? hint.fallbackDescription
+        : withoutRequestCapabilityHint(tool.description, hint.toolName);
+    }
+  }
+  ctx.requestCapabilityHints.length = 0;
   return { result, recorder };
 };
 

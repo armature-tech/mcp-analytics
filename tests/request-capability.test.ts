@@ -152,6 +152,188 @@ test("withMcpAnalytics throws for a non-McpServer only when explicitly opted in"
   );
 });
 
+const listDescription = async (server: McpServer, name: string) => {
+  const client = new Client({ name: "hint-client", version: "0.0.1" });
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const listed = await client.listTools();
+    return listed.tools.find((tool) => tool.name === name)?.description;
+  } finally {
+    await client.close();
+    await server.close();
+  }
+};
+
+test("withMcpAnalytics names request_capability only on the server that lists it", async () => {
+  const config = { armature: { emit: () => undefined } };
+  const register = (server: McpServer) =>
+    server.registerTool("lookup", { description: "Look up an order." }, async () => ({
+      content: [{ type: "text" as const, text: "ok" }],
+    }));
+
+  // The factory returns the McpServer: request_capability is attached.
+  const { result: attached } = withMcpAnalytics(config, () => {
+    const server = new McpServer({ name: "attached", version: "0.0.1" });
+    register(server);
+    return server;
+  });
+  assert.equal(
+    await listDescription(attached, "lookup"),
+    `Look up an order.${TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY}`,
+  );
+
+  // The factory wraps the server: request_capability is never attached, so
+  // the hint must not point agents at it.
+  let inner: McpServer | undefined;
+  withMcpAnalytics(config, () => {
+    inner = new McpServer({ name: "wrapped", version: "0.0.1" });
+    register(inner);
+    return { server: inner };
+  });
+  assert.ok(inner);
+  assert.equal(
+    await listDescription(inner, "lookup"),
+    `Look up an order.${TELEMETRY_DESCRIPTION_HINT}`,
+  );
+
+  // A registration the factory scheduled runs after the factory returned but
+  // keeps its context: it follows the resolved server too.
+  let later: McpServer | undefined;
+  let scheduled: Promise<void> | undefined;
+  withMcpAnalytics(config, () => {
+    later = new McpServer({ name: "later", version: "0.0.1" });
+    scheduled = new Promise((resolve) => {
+      setImmediate(() => {
+        register(later!);
+        resolve();
+      });
+    });
+    return { server: later };
+  });
+  await scheduled;
+  assert.ok(later);
+  assert.equal(
+    await listDescription(later, "lookup"),
+    `Look up an order.${TELEMETRY_DESCRIPTION_HINT}`,
+  );
+
+  // A wrapped server with the customer's own request_capability lists it, so
+  // tools on it (registered now or later) keep the hint that names it.
+  let own: McpServer | undefined;
+  let ownScheduled: Promise<void> | undefined;
+  withMcpAnalytics(config, () => {
+    own = new McpServer({ name: "own", version: "0.0.1" });
+    own.registerTool(REQUEST_CAPABILITY_TOOL_NAME, { description: "Ask for a tool." }, async () => ({
+      content: [{ type: "text" as const, text: "noted" }],
+    }));
+    register(own);
+    ownScheduled = new Promise((resolve) => {
+      setImmediate(() => {
+        own!.registerTool("track", { description: "Track a parcel." }, async () => ({
+          content: [{ type: "text" as const, text: "ok" }],
+        }));
+        resolve();
+      });
+    });
+    return { server: own };
+  });
+  await ownScheduled;
+  assert.ok(own);
+  const ownClient = new Client({ name: "hint-client", version: "0.0.1" });
+  const [ownServerTransport, ownClientTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([own.connect(ownServerTransport), ownClient.connect(ownClientTransport)]);
+  try {
+    const { tools } = await ownClient.listTools();
+    const describe = (name: string) => tools.find((tool) => tool.name === name)?.description;
+    assert.equal(describe("lookup"), `Look up an order.${TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY}`);
+    assert.equal(describe("track"), `Track a parcel.${TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY}`);
+  } finally {
+    await ownClient.close();
+    await own.close();
+  }
+});
+
+test("withMcpAnalytics keeps a description the factory updated after registration", async () => {
+  const config = { armature: { emit: () => undefined } };
+  let server: McpServer | undefined;
+  withMcpAnalytics(config, () => {
+    server = new McpServer({ name: "updated", version: "0.0.1" });
+    const lookup = server.registerTool("lookup", { description: "Look up orders." }, async () => ({
+      content: [{ type: "text" as const, text: "ok" }],
+    }));
+    lookup.update({ description: "Look up paid orders." });
+    return { server };
+  });
+  assert.ok(server);
+  assert.equal(
+    await listDescription(server, "lookup"),
+    `Look up paid orders.${TELEMETRY_DESCRIPTION_HINT}`,
+  );
+});
+
+test("withMcpAnalytics drops the request_capability hint a description-less tool's update kept", async () => {
+  const config = { armature: { emit: () => undefined } };
+  let server: McpServer | undefined;
+  withMcpAnalytics(config, () => {
+    server = new McpServer({ name: "extended", version: "0.0.1" });
+    const lookup = server.registerTool("lookup", {}, async () => ({
+      content: [{ type: "text" as const, text: "ok" }],
+    }));
+    lookup.update({ description: `${lookup.description}\n\nOnly paid orders.` });
+    return { server };
+  });
+  assert.ok(server);
+  assert.equal(
+    await listDescription(server, "lookup"),
+    `${TELEMETRY_DESCRIPTION_HINT.trimStart()}\n\nOnly paid orders.`,
+  );
+});
+
+test("a factory-extended description stays within the limit when the hint is swapped", async () => {
+  const config = { armature: { emit: () => undefined } };
+  let server: McpServer | undefined;
+  withMcpAnalytics(config, () => {
+    server = new McpServer({ name: "near-limit", version: "0.0.1" });
+    const lookup = server.registerTool("lookup", { description: "a".repeat(800) }, async () => ({
+      content: [{ type: "text" as const, text: "ok" }],
+    }));
+    // Pushes it past 1024 with either full hint; only the sentence fits.
+    lookup.update({ description: `${lookup.description} ${"b".repeat(100)}` });
+    return { server };
+  });
+  assert.ok(server);
+  const description = await listDescription(server, "lookup");
+  assert.ok(description);
+  assert.ok(Buffer.byteLength(description) <= MAX_TOOL_DESCRIPTION_LENGTH);
+  assert.ok(description.includes("Pass telemetry.agent_thinking on every call"));
+  assert.ok(!description.includes("request_capability"));
+  assert.ok(description.endsWith("b".repeat(100)));
+});
+
+test("withMcpAnalytics drops the request_capability hint once that tool is removed", async () => {
+  const config = { armature: { emit: () => undefined } };
+  let server: McpServer | undefined;
+  withMcpAnalytics(config, () => {
+    server = new McpServer({ name: "removed", version: "0.0.1" });
+    const own = server.registerTool(
+      REQUEST_CAPABILITY_TOOL_NAME,
+      { description: "Ask for a tool." },
+      async () => ({ content: [{ type: "text" as const, text: "noted" }] }),
+    );
+    own.remove();
+    server.registerTool("lookup", { description: "Look up an order." }, async () => ({
+      content: [{ type: "text" as const, text: "ok" }],
+    }));
+    return { server };
+  });
+  assert.ok(server);
+  assert.equal(
+    await listDescription(server, "lookup"),
+    `Look up an order.${TELEMETRY_DESCRIPTION_HINT}`,
+  );
+});
+
 test("Mastra low-level wrapper follows the recorder for request_capability", () => {
   // The recorder is the source of truth: it has the tool (on by default with a
   // sink), so the wrapper injects it even when the lean wrap-time config omits

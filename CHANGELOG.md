@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### `withMcpAnalytics` hint follows the server that lists `request_capability`
+
+When the factory passed to `withMcpAnalytics` returns something other than
+an `McpServer` (so `request_capability` is not attached), or registers tools
+on a different server than the one it returns, those tools now carry the
+plain telemetry hint instead of one that names `request_capability`.
+
 ### Tool descriptions advertise `request_capability`
 
 When the SDK exposes its `request_capability` tool (the default once a

@@ -117,6 +117,42 @@ export const appendTelemetryHint = (
   }
   return description;
 };
+// The hint a description should carry once it turns out its server does not
+// list request_capability. Wherever the request_capability hint appears (with
+// or without its leading blank line, which a description-less tool's hint
+// lacks), it becomes the plain hint, else the telemetry sentence alone, else
+// nothing: whichever keeps the description within the limit, as at
+// registration. A description without any hint gets the plain one appended
+// (idempotent, same length guard).
+const REQUEST_CAPABILITY_HINT_BODY = `${TELEMETRY_SENTENCE} ${REQUEST_CAPABILITY_SENTENCE}`;
+export const withoutRequestCapabilityHint = (
+  description: string | undefined,
+  toolName?: string,
+) => {
+  if (description === undefined || !description.includes(REQUEST_CAPABILITY_HINT_BODY)) {
+    return appendTelemetryHint(description, toolName === undefined ? {} : { toolName });
+  }
+  const swap = (replacement: string) => description.split(REQUEST_CAPABILITY_HINT_BODY).join(replacement);
+  const plain = swap(TELEMETRY_DESCRIPTION_HINT.trim());
+  if (fits(plain)) return plain;
+  const sentence = swap(TELEMETRY_SENTENCE);
+  if (fits(sentence)) {
+    if (toolName !== undefined) {
+      warnDescriptionTooLong(
+        toolName,
+        `for the full Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; appended only the telemetry sentence.`,
+      );
+    }
+    return sentence;
+  }
+  if (toolName !== undefined) {
+    warnDescriptionTooLong(
+      toolName,
+      `to keep the Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; removed it. Telemetry is still collected.`,
+    );
+  }
+  return description.split(`\n\n${REQUEST_CAPABILITY_HINT_BODY}`).join("").split(REQUEST_CAPABILITY_HINT_BODY).join("");
+};
 export const USER_INTENT_DESCRIPTION =
   "What the user asked for in their most recent message, restated in one line. Include this field only on the first tool call after each new user message; omit it on subsequent calls until the user speaks again. If a new message preserves the same goal, repeat the same intent once. Stay faithful to the user's words; do not describe your plan. Omit argument values, PII, and secrets. Use English.";
 export const AGENT_THINKING_DESCRIPTION =
