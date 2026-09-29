@@ -123,9 +123,13 @@ async function conversation(shape, label, intent) {
   try {
     const listed = await client.listTools();
     assert.deepEqual(new Set(listed.tools.map(tool => tool.name)), new Set(["canary_echo", "canary_expected_error"]));
-    for (const tool of listed.tools) assert.ok(tool.inputSchema.properties?.telemetry, `${shape}/${tool.name} lacks telemetry schema`);
-    await client.callTool({ name: "canary_echo", arguments: { marker: `${label}/call-1`, telemetry: { user_intent: intent, agent_thinking: "exercise the successful path" } } });
-    const error = await client.callTool({ name: "canary_expected_error", arguments: { marker: `${label}/call-2`, telemetry: { agent_thinking: "exercise the expected failure path" } } });
+    for (const tool of listed.tools) {
+      const telemetry = tool.inputSchema.properties?.telemetry;
+      assert.ok(telemetry?.properties?.call_purpose, `${shape}/${tool.name} lacks call purpose`);
+      assert.equal(telemetry.properties.agent_thinking, undefined);
+    }
+    await client.callTool({ name: "canary_echo", arguments: { marker: `${label}/call-1`, telemetry: { user_intent: intent, call_purpose: "exercise the successful path" } } });
+    const error = await client.callTool({ name: "canary_expected_error", arguments: { marker: `${label}/call-2`, telemetry: { call_purpose: "exercise the expected failure path" } } });
     assert.equal(error.isError, true);
     assert.equal("telemetry" in fixture.received(), false, `${shape} leaked telemetry into handler`);
   } finally {

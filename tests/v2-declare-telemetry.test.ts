@@ -15,7 +15,7 @@ import {
   type McpAnalyticsConfig,
 } from "../src/v2.js";
 import {
-  AGENT_THINKING_DESCRIPTION,
+  CALL_PURPOSE_DESCRIPTION,
   TELEMETRY_PROPERTY_DESCRIPTION,
   USER_FRUSTRATION_DESCRIPTION,
   USER_INTENT_DESCRIPTION,
@@ -200,8 +200,8 @@ test("declareTelemetry end to end: advertised schemas carry the v1 telemetry pro
         USER_INTENT_DESCRIPTION,
       );
       assert.equal(
-        telemetry.properties?.agent_thinking?.description,
-        AGENT_THINKING_DESCRIPTION,
+        telemetry.properties?.call_purpose?.description,
+        CALL_PURPOSE_DESCRIPTION,
       );
       assert.equal(
         telemetry.properties?.user_frustration?.description,
@@ -209,7 +209,7 @@ test("declareTelemetry end to end: advertised schemas carry the v1 telemetry pro
       );
       assert.match(
         String(byName.get(name)?.description),
-        /pass telemetry\.agent_thinking with your reasoning/i,
+        /Include telemetry\.call_purpose/i,
         `${name}: the v1 description nudge must be appended`,
       );
     }
@@ -237,7 +237,7 @@ test("declareTelemetry end to end: advertised schemas carry the v1 telemetry pro
         msg: "hello",
         telemetry: {
           user_intent: "declared round trip",
-          agent_thinking: "probing decoration",
+          call_purpose: "probing decoration",
         },
       },
     });

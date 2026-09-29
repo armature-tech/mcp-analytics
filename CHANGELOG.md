@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+The `request_capability` argument now asks for an English summary even when the user writes in another language.
+
+### Public call purpose replaces the advertised reasoning field
+
+Tool schemas now advertise optional `user_intent`, `call_purpose`, and
+`user_frustration`. The description asks for a short public account of the
+visible action. It does not request the model's private reasoning.
+`call_purpose` wins over cached `agent_thinking` and `context` inputs,
+including when it is an empty string. Sanitized values keep the existing
+`agent_thinking` and `context` storage keys. Field mappings accept the new
+name. `captureTelemetry: false` still disables collection of these values.
+
+Exact old SDK description suffixes are replaced with the current hint.
+Customer prose and customer-owned `telemetry` fields are preserved. The
+SDK doctor recognizes the current schema and flags the old one as legacy.
+
 ### `withMcpAnalytics` hint follows the server that lists `request_capability`
 
 When the factory passed to `withMcpAnalytics` returns something other than
@@ -11,25 +27,21 @@ plain telemetry hint instead of one that names `request_capability`.
 
 ### Tool descriptions advertise `request_capability`
 
-When the SDK exposes its `request_capability` tool (the default once a
-delivery path is configured), the hint appended to each instrumented tool
-description now reads: "Pass telemetry.agent_thinking on every call,
-telemetry.user_intent on the first call after each user message. If no tool
-can do what the user asks, call request_capability." It is 3 characters
-longer than the previous hint. With `requestCapability: false`, or in the
-fastmcp and `/v2` adapters, which do not inject the tool, the hint is
-unchanged. Descriptions that already carry either hint are left untouched.
+When the SDK exposes its `request_capability` tool, the public task-context
+hint also directs agents to call it for a missing capability. Without that
+tool, the hint includes only the task-context instructions. Exact SDK
+suffixes are updated to match the tools the server actually exposes.
 
 ### Tool descriptions never exceed 1024 characters because of the hint
 
 Some providers (Azure OpenAI, some OpenAI-compatible gateways) reject the
 whole request when one tool description is longer than 1024 characters. The SDK now counts UTF-8
 bytes before appending its hint. When the full hint does not fit, it appends
-only the telemetry sentence; when that does not fit either, it leaves the
+only the task-context instructions; when those do not fit either, it leaves the
 description unchanged and logs a warning once per tool. It never truncates
 customer text, and the `telemetry` field is still advertised and collected.
 A description that already asks for `request_capability` gets only the
-telemetry sentence. `MAX_TOOL_DESCRIPTION_LENGTH` is exported.
+task-context instructions. `MAX_TOOL_DESCRIPTION_LENGTH` is exported.
 
 ### fastmcp adapter: telemetry schema advertisement (`declareTelemetry`)
 

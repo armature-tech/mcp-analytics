@@ -1,5 +1,5 @@
 {
-  "_comment": "Shared cross-SDK telemetry contract vectors. Copies of this file live in all three SDK packages and must stay byte-identical. See packages/TELEMETRY-CONTRACT.md in the monorepo.",
+  "_comment": "Shared cross-SDK telemetry contract vectors. Copies of this file live in all four SDK packages and must stay byte-identical. See packages/TELEMETRY-CONTRACT.md in the monorepo.",
   "placeholders": {
     "binary": "[binary removed]",
     "base64": "[base64 removed]",
@@ -128,6 +128,106 @@
       },
       "expect_args": {
         "q": "x"
+      },
+      "expect_telemetry": null
+    },
+    {
+      "name": "injected_call_purpose_normalizes_to_compatible_storage",
+      "mode": "injected",
+      "args": {
+        "q": "x",
+        "telemetry": {
+          "call_purpose": "Find the record for the requested update"
+        }
+      },
+      "expect_args": {
+        "q": "x"
+      },
+      "expect_telemetry": {
+        "agent_thinking": "Find the record for the requested update"
+      }
+    },
+    {
+      "name": "injected_call_purpose_wins_over_old_aliases",
+      "mode": "injected",
+      "args": {
+        "q": "x",
+        "telemetry": {
+          "call_purpose": "new purpose",
+          "agent_thinking": "old thinking",
+          "context": "older context"
+        }
+      },
+      "expect_args": {
+        "q": "x"
+      },
+      "expect_telemetry": {
+        "agent_thinking": "new purpose"
+      }
+    },
+    {
+      "name": "injected_empty_call_purpose_wins_over_old_aliases",
+      "mode": "injected",
+      "args": {
+        "q": "x",
+        "telemetry": {
+          "call_purpose": "",
+          "agent_thinking": "old thinking",
+          "context": "older context"
+        }
+      },
+      "expect_args": {
+        "q": "x"
+      },
+      "expect_telemetry": {
+        "agent_thinking": ""
+      }
+    },
+    {
+      "name": "injected_invalid_call_purpose_uses_valid_legacy",
+      "mode": "injected",
+      "args": {
+        "q": "x",
+        "telemetry": {
+          "call_purpose": 42,
+          "agent_thinking": "old context"
+        }
+      },
+      "expect_args": {
+        "q": "x"
+      },
+      "expect_telemetry": {
+        "agent_thinking": "old context"
+      }
+    },
+    {
+      "name": "scrub_call_purpose_never_exported",
+      "mode": "scrub",
+      "args": {
+        "q": "x",
+        "telemetry": {
+          "call_purpose": "cached purpose"
+        }
+      },
+      "expect_args": {
+        "q": "x"
+      },
+      "expect_telemetry": null
+    },
+    {
+      "name": "owned_call_purpose_never_exported",
+      "mode": "owned",
+      "args": {
+        "q": "x",
+        "telemetry": {
+          "call_purpose": "Customer data"
+        }
+      },
+      "expect_args": {
+        "q": "x",
+        "telemetry": {
+          "call_purpose": "Customer data"
+        }
       },
       "expect_telemetry": null
     }

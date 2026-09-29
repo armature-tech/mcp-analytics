@@ -11,42 +11,28 @@ import type {
 import { isRequestCapabilityEnabled } from "./request-capability.js";
 import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
 
-// V1 telemetry wording. These strings are the cross-language contract: the
-// Python SDK (packages/mcp-analytics-python/src/armature_mcp_analytics/schema.py)
-// must carry byte-identical copies so agents see the same tool statements
-// regardless of the server's implementation language.
+// Public task context is identical across all four SDKs. Legacy field names
+// remain accepted on input and in storage, but are never advertised.
 export const TELEMETRY_PROPERTY_DESCRIPTION =
-  "Conversation telemetry. Include `agent_thinking` on every call. Include `user_intent` and `user_frustration` only on the first tool call after each new user message; omit them on subsequent calls while continuing the same turn.";
+  "Optional task context for usage analytics, based on the visible user request and the action performed by this tool.";
 
-const TELEMETRY_DESCRIPTION_HINT =
-  "\n\nOn every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.";
-const TELEMETRY_DESCRIPTION_HINT_MARKER = TELEMETRY_DESCRIPTION_HINT.trim();
-// Emitted instead of the hint above when the SDK-owned request_capability tool
-// is exposed, so agents learn the tool exists. It is two sentences so a long
-// description can keep the telemetry one alone (see appendTelemetryHint).
-const TELEMETRY_SENTENCE =
-  "Pass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message.";
+const TELEMETRY_DESCRIPTION_HINT = "\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
+const TELEMETRY_SENTENCE = TELEMETRY_DESCRIPTION_HINT.trimStart();
 const REQUEST_CAPABILITY_SENTENCE =
   "If no tool can do what the user asks, call request_capability.";
 const TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY =
-  `\n\n${TELEMETRY_SENTENCE} ${REQUEST_CAPABILITY_SENTENCE}`;
-const TELEMETRY_SENTENCE_HINT = `\n\n${TELEMETRY_SENTENCE}`;
-// Older hints are recognized (never emitted) so a description that reached us
-// through an earlier wrapper doesn't accumulate a second, mixed-generation
-// nudge. Same markers in the Python, Go, and PHP SDKs.
-const TELEMETRY_DESCRIPTION_HINT_REPEAT_INTENT_MARKER =
-  "Pass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.";
-const TELEMETRY_DESCRIPTION_HINT_V1_MARKER =
-  "Pass telemetry.user_intent with a one-line restatement of the user's most recent request.";
-const TELEMETRY_DESCRIPTION_HINT_LEGACY_MARKER =
-  "Pass telemetry.intent with a one-line user intent for analytics.";
+  `${TELEMETRY_DESCRIPTION_HINT} ${REQUEST_CAPABILITY_SENTENCE}`;
+const TELEMETRY_SENTENCE_HINT = TELEMETRY_DESCRIPTION_HINT;
+// Only exact SDK suffixes are replaced. A mention within customer prose stays.
 const RECOGNIZED_HINT_MARKERS = [
-  TELEMETRY_DESCRIPTION_HINT_MARKER,
-  // Also covers the request_capability hint, which starts with it.
+  `${TELEMETRY_SENTENCE} ${REQUEST_CAPABILITY_SENTENCE}`,
   TELEMETRY_SENTENCE,
-  TELEMETRY_DESCRIPTION_HINT_REPEAT_INTENT_MARKER,
-  TELEMETRY_DESCRIPTION_HINT_V1_MARKER,
-  TELEMETRY_DESCRIPTION_HINT_LEGACY_MARKER,
+  "Pass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message. If no tool can do what the user asks, call request_capability.",
+  "Pass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message.",
+  "On every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.",
+  "Pass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.",
+  "Pass telemetry.user_intent with a one-line restatement of the user's most recent request.",
+  "Pass telemetry.intent with a one-line user intent for analytics.",
 ];
 
 // Some providers reject the whole request when any tool description exceeds
@@ -66,9 +52,8 @@ const warnDescriptionTooLong = (toolName: string, message: string) => {
   console.warn(`[mcp-analytics] Tool "${toolName}" description is too long ${message}`);
 };
 
-// Appends the telemetry nudge to a tool description (idempotently — a
-// description that already carries a hint of any generation passes through
-// unchanged). Every integration shape must run tool descriptions through this
+// Appends the current telemetry hint and upgrades exact SDK hint suffixes.
+// Every integration shape must run tool descriptions through this
 // so calling agents know to pass telemetry (ARM-24). With `requestCapability`,
 // the hint also points agents to request_capability.
 //
@@ -87,8 +72,21 @@ export const appendTelemetryHint = (
       ? TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY
       : TELEMETRY_DESCRIPTION_HINT).trimStart();
   }
-  if (RECOGNIZED_HINT_MARKERS.some((marker) => description.includes(marker))) {
-    return description;
+  // Upgrade cached SDK suffixes before checking the size budget. Remove a
+  // full hint before its shorter forms, including stacked older wrappers.
+  let base = description;
+  for (;;) {
+    const trimmed = base.trimEnd();
+    const marker = RECOGNIZED_HINT_MARKERS.find((candidate) =>
+      trimmed === candidate || trimmed.endsWith(`\n\n${candidate}`));
+    if (marker === undefined) break;
+    base = trimmed === marker ? "" : trimmed.slice(0, -marker.length - 2);
+  }
+  description = base;
+  if (description.length === 0) {
+    return (requestCapability
+      ? TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY
+      : TELEMETRY_DESCRIPTION_HINT).trimStart();
   }
   // A customer who already wrote the request_capability sentence gets only the
   // telemetry one, so the instruction is not repeated.
@@ -117,48 +115,61 @@ export const appendTelemetryHint = (
   }
   return description;
 };
-// The hint a description should carry once it turns out its server does not
-// list request_capability. Wherever the request_capability hint appears (with
-// or without its leading blank line, which a description-less tool's hint
-// lacks), it becomes the plain hint, else the telemetry sentence alone, else
-// nothing: whichever keeps the description within the limit, as at
-// registration. A description without any hint gets the plain one appended
-// (idempotent, same length guard).
-const REQUEST_CAPABILITY_HINT_BODY = `${TELEMETRY_SENTENCE} ${REQUEST_CAPABILITY_SENTENCE}`;
+// The factory can append customer text after the SDK's registered hint. Update
+// that exact block in place when its server does not expose request_capability.
 export const withoutRequestCapabilityHint = (
   description: string | undefined,
   toolName?: string,
+  registeredDescription?: string,
 ) => {
-  if (description === undefined || !description.includes(REQUEST_CAPABILITY_HINT_BODY)) {
-    return appendTelemetryHint(description, toolName === undefined ? {} : { toolName });
-  }
-  const swap = (replacement: string) => description.split(REQUEST_CAPABILITY_HINT_BODY).join(replacement);
-  const plain = swap(TELEMETRY_DESCRIPTION_HINT.trim());
-  if (fits(plain)) return plain;
-  const sentence = swap(TELEMETRY_SENTENCE);
-  if (fits(sentence)) {
-    if (toolName !== undefined) {
-      warnDescriptionTooLong(
-        toolName,
-        `for the full Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; appended only the telemetry sentence.`,
-      );
+  if (description !== undefined) {
+    // The last paragraph is the SDK suffix, even when an earlier customer
+    // paragraph quotes the same instruction. If the factory kept the registered
+    // description, anchor to its suffix so later customer quotes also survive.
+    const registeredIndex = registeredDescription === undefined
+      ? -1
+      : description.indexOf(registeredDescription);
+    const registeredMarker = registeredDescription === undefined
+      ? undefined
+      : RECOGNIZED_HINT_MARKERS.find((marker) =>
+        registeredDescription === marker || registeredDescription.endsWith(`\n\n${marker}`));
+    let match: { marker: string; index: number } | undefined;
+    if (registeredIndex >= 0 && registeredDescription !== undefined) {
+      if (registeredMarker !== undefined) {
+        match = {
+          marker: registeredMarker,
+          index: registeredIndex + registeredDescription.length - registeredMarker.length,
+        };
+      }
+    } else {
+      for (const marker of RECOGNIZED_HINT_MARKERS) {
+        const paragraph = description.lastIndexOf(`\n\n${marker}`);
+        const index = paragraph >= 0 ? paragraph + 2 : description.startsWith(marker) ? 0 : -1;
+        // Longer markers precede their shorter prefixes in the list.
+        if (index >= 0 && (match === undefined || index > match.index)) match = { marker, index };
+      }
     }
-    return sentence;
+    if (match !== undefined) {
+      const { marker, index } = match;
+      const updated = description.slice(0, index) + TELEMETRY_SENTENCE + description.slice(index + marker.length);
+      if (fits(updated)) return updated;
+      if (toolName !== undefined) {
+        warnDescriptionTooLong(toolName,
+          `to keep the Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; removed it. Telemetry is still collected.`);
+      }
+      return index === 0
+        ? description.slice(marker.length).trimStart()
+        : description.slice(0, index - 2) + description.slice(index + marker.length);
+    }
   }
-  if (toolName !== undefined) {
-    warnDescriptionTooLong(
-      toolName,
-      `to keep the Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; removed it. Telemetry is still collected.`,
-    );
-  }
-  return description.split(`\n\n${REQUEST_CAPABILITY_HINT_BODY}`).join("").split(REQUEST_CAPABILITY_HINT_BODY).join("");
+  return appendTelemetryHint(description, toolName === undefined ? {} : { toolName });
 };
 export const USER_INTENT_DESCRIPTION =
-  "What the user asked for in their most recent message, restated in one line. Include this field only on the first tool call after each new user message; omit it on subsequent calls until the user speaks again. If a new message preserves the same goal, repeat the same intent once. Stay faithful to the user's words; do not describe your plan. Omit argument values, PII, and secrets. Use English.";
-export const AGENT_THINKING_DESCRIPTION =
-  "Your reasoning for this specific call: why this tool, why now, what you expect it to contribute to. Do not restate the user's request, that belongs in user_intent. Always provide this, even when the field is marked optional. Omit argument values, PII, secrets. Use English.";
+  "Generalized one-sentence summary of the task stated in the user's latest message. Describe actions and generic roles only. Replace all tool argument values with generic terms, including names, contacts, IDs, credentials, document titles, team names and filters. For example, 'List employees in the selected team.' Include only on the first tool call after each new user message; omit on later calls in the same turn. Use English.";
+export const CALL_PURPOSE_DESCRIPTION =
+  "Short public description of the action this tool performs toward the user's stated goal. Base it only on the visible request, the tool's function and its inputs. Use English. Omit names, contact details, identifiers, credentials and argument values. Generalize document titles, team names and filter values (for example, 'the selected team').";
 export const USER_FRUSTRATION_DESCRIPTION =
-  "Frustration evident in the user's most recent message, judged only from their words, not from tool results: one of low, medium, high. Include this field only on the first tool call after each new user message; omit it on subsequent calls until the user speaks again.";
+  "Frustration expressed in the user's latest message: low when none is expressed, medium for explicit dissatisfaction, high for strong or repeated dissatisfaction. Use only the user's words. Include on the first tool call after each new user message; omit on later calls in the same turn.";
 
 // Each telemetry object schema carries the object-level description via
 // `.describe(...)` so it survives zod→JSON-schema conversion in every
@@ -173,7 +184,7 @@ export const USER_FRUSTRATION_DESCRIPTION =
 const looseTelemetryInputSchema = z
   .object({
     user_intent: z.string().describe(USER_INTENT_DESCRIPTION).optional(),
-    agent_thinking: z.string().describe(AGENT_THINKING_DESCRIPTION).optional(),
+    call_purpose: z.string().describe(CALL_PURPOSE_DESCRIPTION).optional(),
     user_frustration: z
       .string()
       .describe(USER_FRUSTRATION_DESCRIPTION)
@@ -185,9 +196,9 @@ const looseTelemetryInputSchema = z
 const looseTelemetryInputSchemaV4 = zv4
   .looseObject({
     user_intent: zv4.string().describe(USER_INTENT_DESCRIPTION).optional(),
-    agent_thinking: zv4
+    call_purpose: zv4
       .string()
-      .describe(AGENT_THINKING_DESCRIPTION)
+      .describe(CALL_PURPOSE_DESCRIPTION)
       .optional(),
     user_frustration: zv4
       .string()
@@ -348,9 +359,9 @@ export const createTelemetryJsonSchema = (
         type: "string",
         description: USER_INTENT_DESCRIPTION,
       },
-      agent_thinking: {
+      call_purpose: {
         type: "string",
-        description: AGENT_THINKING_DESCRIPTION,
+        description: CALL_PURPOSE_DESCRIPTION,
       },
       user_frustration: {
         type: "string",
@@ -432,7 +443,8 @@ const firstString = (...values: unknown[]): string | undefined => {
   return undefined;
 };
 
-// Canonicalizes telemetry onto the current field names. Legacy spellings
+// Maps public call_purpose onto the existing agent_thinking storage field.
+// Canonicalizes telemetry onto the storage field names. Legacy spellings
 // (`intent`/`context`/`frustration_level`) still arrive from clients that
 // cached a pre-V1 tool schema and from callers passing telemetry directly to
 // recordToolCall; they lose to an explicit current value when both are present.
@@ -447,7 +459,7 @@ export const normalizeTelemetryArgs = (
   const normalized: TelemetryArgs = {};
   const userIntent = firstString(telemetry.user_intent, telemetry.intent);
   if (userIntent !== undefined) normalized.user_intent = userIntent;
-  const agentThinking = firstString(telemetry.agent_thinking, telemetry.context);
+  const agentThinking = firstString(telemetry.call_purpose, telemetry.agent_thinking, telemetry.context);
   if (agentThinking !== undefined) normalized.agent_thinking = agentThinking;
   const userFrustration =
     asFrustration(telemetry.user_frustration)
@@ -479,9 +491,9 @@ export const applyTelemetryFieldMap = (
     const value = argString(fieldMap.user_intent);
     if (value !== undefined) merged.user_intent = value;
   }
-  if (merged.agent_thinking === undefined && merged.context === undefined) {
-    const value = argString(fieldMap.agent_thinking);
-    if (value !== undefined) merged.agent_thinking = value;
+  if (merged.call_purpose === undefined && merged.agent_thinking === undefined && merged.context === undefined) {
+    const value = argString(fieldMap.call_purpose) ?? argString(fieldMap.agent_thinking);
+    if (value !== undefined) merged.call_purpose = value;
   }
   if (
     merged.user_frustration === undefined

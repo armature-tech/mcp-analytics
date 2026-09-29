@@ -14,12 +14,12 @@ import {
   REQUEST_CAPABILITY_DESCRIPTION,
   REQUEST_CAPABILITY_TOOL_NAME,
 } from "../src/request-capability.js";
-import { appendTelemetryHint, MAX_TOOL_DESCRIPTION_LENGTH } from "../src/schema.js";
+import { appendTelemetryHint, withoutRequestCapabilityHint, MAX_TOOL_DESCRIPTION_LENGTH } from "../src/schema.js";
 
 const TELEMETRY_DESCRIPTION_HINT =
-  "\n\nOn every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.";
+  "\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
 const TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY =
-  "\n\nPass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message. If no tool can do what the user asks, call request_capability.";
+  "\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message. If no tool can do what the user asks, call request_capability.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];
@@ -95,7 +95,7 @@ test("recorder injects and records request_capability when enabled", async () =>
   );
   assert.equal(
     (schema.properties?.capability as { description?: string } | undefined)?.description,
-    "The capability required to complete the user's request. Omit argument values, PII, and secrets. Use English.",
+    "One English sentence describing the missing capability needed for the user's task. Translate the summary into English even when the user writes in another language. Describe generic actions and roles. Omit names, contacts, IDs, credentials and all tool argument values.",
   );
 
   const result = await recorder.dispatch<{ content: { text: string }[] }>(
@@ -290,25 +290,79 @@ test("withMcpAnalytics drops the request_capability hint a description-less tool
   );
 });
 
+test("factory hint updates preserve an earlier customer quote of the same instruction", () => {
+  const full = appendTelemetryHint(undefined, { requestCapability: true });
+  const quote = `Documented example: "${full}".`;
+  const note = "\n\nFactory note.";
+  assert.equal(
+    withoutRequestCapabilityHint(`${quote}\n\n${full}${note}`),
+    `${quote}${TELEMETRY_DESCRIPTION_HINT}${note}`,
+  );
+
+  // When the public hint cannot fit, remove that same paragraph and retain
+  // both the customer quote and the factory's note exactly as supplied.
+  const padding = "x".repeat(MAX_TOOL_DESCRIPTION_LENGTH - Buffer.byteLength(quote + TELEMETRY_DESCRIPTION_HINT + note) + 1);
+  assert.equal(
+    withoutRequestCapabilityHint(`${quote}${padding}\n\n${full}${note}`),
+    `${quote}${padding}${note}`,
+  );
+});
+
+test("factory hint updates preserve a customer paragraph that quotes the capability hint", async () => {
+  const full = appendTelemetryHint(undefined, { requestCapability: true });
+  const guide = `Guide:\n\n${full}\n\nEnd of guide.`;
+  const note = "\n\nFactory note.";
+  const registered = appendTelemetryHint(guide, { requestCapability: true });
+  assert.equal(withoutRequestCapabilityHint(`${registered}${note}`), `${guide}${TELEMETRY_DESCRIPTION_HINT}${note}`);
+
+  let server: McpServer | undefined;
+  withMcpAnalytics({ armature: { emit: () => undefined } }, () => {
+    server = new McpServer({ name: "quoted-paragraph", version: "0.0.1" });
+    const lookup = server.registerTool("lookup", { description: guide }, async () => ({
+      content: [{ type: "text" as const, text: "ok" }],
+    }));
+    lookup.update({ description: `${lookup.description}${note}` });
+    return { server };
+  });
+  assert.ok(server);
+  assert.equal(await listDescription(server, "lookup"), `${guide}${TELEMETRY_DESCRIPTION_HINT}${note}`);
+});
+
+test("factory hint updates preserve customer quotes appended after the registered SDK hint", async () => {
+  const full = appendTelemetryHint(undefined, { requestCapability: true });
+  const note = `\n\nGuide:\n\n${full}\n\nEnd of guide.`;
+  let server: McpServer | undefined;
+  withMcpAnalytics({ armature: { emit: () => undefined } }, () => {
+    server = new McpServer({ name: "appended-quote", version: "0.0.1" });
+    const lookup = server.registerTool("lookup", { description: "Look up orders." }, async () => ({
+      content: [{ type: "text" as const, text: "ok" }],
+    }));
+    lookup.update({ description: `${lookup.description}${note}` });
+    return { server };
+  });
+  assert.ok(server);
+  assert.equal(await listDescription(server, "lookup"), `Look up orders.${TELEMETRY_DESCRIPTION_HINT}${note}`);
+});
+
 test("a factory-extended description stays within the limit when the hint is swapped", async () => {
   const config = { armature: { emit: () => undefined } };
   let server: McpServer | undefined;
   withMcpAnalytics(config, () => {
     server = new McpServer({ name: "near-limit", version: "0.0.1" });
-    const lookup = server.registerTool("lookup", { description: "a".repeat(800) }, async () => ({
+    const lookup = server.registerTool("lookup", { description: "a".repeat(MAX_TOOL_DESCRIPTION_LENGTH - TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY.length - 1) }, async () => ({
       content: [{ type: "text" as const, text: "ok" }],
     }));
-    // Pushes it past 1024 with either full hint; only the sentence fits.
-    lookup.update({ description: `${lookup.description} ${"b".repeat(100)}` });
+    // Pushes the capability hint past 1024; the public task-context hint fits.
+    lookup.update({ description: `${lookup.description} ${"b".repeat(20)}` });
     return { server };
   });
   assert.ok(server);
   const description = await listDescription(server, "lookup");
   assert.ok(description);
   assert.ok(Buffer.byteLength(description) <= MAX_TOOL_DESCRIPTION_LENGTH);
-  assert.ok(description.includes("Pass telemetry.agent_thinking on every call"));
+  assert.ok(description.includes("Include telemetry.call_purpose"));
   assert.ok(!description.includes("request_capability"));
-  assert.ok(description.endsWith("b".repeat(100)));
+  assert.ok(description.endsWith("b".repeat(20)));
 });
 
 test("withMcpAnalytics drops the request_capability hint once that tool is removed", async () => {
@@ -471,25 +525,46 @@ test("the per-tool hint points agents to request_capability only when the SDK ex
     armature: { emit: () => undefined, requestCapability: false },
   }).decorateDefinitions([definition])[0];
   assert.equal(disabled?.description, `Look up a customer.${TELEMETRY_DESCRIPTION_HINT}`);
-  // The new hint keeps the old length budget (clients cap descriptions at 1024).
-  assert.ok(
-    TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY.length
-      <= TELEMETRY_DESCRIPTION_HINT.length + 3,
-  );
+  assert.ok(Buffer.byteLength(enabled?.description ?? "", "utf8") <= MAX_TOOL_DESCRIPTION_LENGTH);
 });
 
 test("appendTelemetryHint never stacks a second hint of either kind", () => {
   const withNew = `Look up a customer.${TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY}`;
   const withOld = `Look up a customer.${TELEMETRY_DESCRIPTION_HINT}`;
   for (const requestCapability of [true, false]) {
-    assert.equal(appendTelemetryHint(withNew, { requestCapability }), withNew);
-    assert.equal(appendTelemetryHint(withOld, { requestCapability }), withOld);
+    const expected = requestCapability ? withNew : withOld;
+    assert.equal(appendTelemetryHint(withNew, { requestCapability }), expected);
+    assert.equal(appendTelemetryHint(withOld, { requestCapability }), expected);
   }
   assert.equal(
     appendTelemetryHint(undefined, { requestCapability: true }),
     TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY.trimStart(),
   );
   assert.equal(appendTelemetryHint(undefined), TELEMETRY_DESCRIPTION_HINT.trimStart());
+});
+
+test("old SDK suffixes are upgraded without changing customer prose", () => {
+  const legacy = [
+    "On every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.",
+    "Pass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message.",
+    "Pass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message. If no tool can do what the user asks, call request_capability.",
+    "Pass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.",
+    "Pass telemetry.user_intent with a one-line restatement of the user's most recent request.",
+    "Pass telemetry.intent with a one-line user intent for analytics.",
+  ];
+  for (const hint of legacy) {
+    const migrated = appendTelemetryHint(`Customer text.\n\n${hint}`, { requestCapability: true });
+    assert.equal(migrated, `Customer text.${TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY}`);
+    assert.doesNotMatch(migrated, /agent_thinking|your reasoning/);
+    assert.equal(appendTelemetryHint(hint), TELEMETRY_DESCRIPTION_HINT.trimStart());
+    const prose = `The previous instruction was: ${hint} This is customer documentation.`;
+    assert.equal(appendTelemetryHint(prose), `${prose}${TELEMETRY_DESCRIPTION_HINT}`);
+  }
+  const longBase = "é".repeat(500);
+  assert.equal(appendTelemetryHint(`${longBase}\n\n${legacy[0]}`), longBase);
+  const stacked = `Customer text.\n\n${legacy[0]}\n\n${legacy[1]}`;
+  assert.equal(appendTelemetryHint(stacked), `Customer text.${TELEMETRY_DESCRIPTION_HINT}`);
+  assert.equal(appendTelemetryHint(`Customer text.  \n\n${legacy[0]}`), `Customer text.  ${TELEMETRY_DESCRIPTION_HINT}`);
 });
 
 test("McpServer tools/list carries the request_capability hint next to the SDK tool", async () => {
@@ -527,7 +602,7 @@ test("McpServer tools/list carries the request_capability hint next to the SDK t
 });
 
 const TELEMETRY_SENTENCE_HINT =
-  "\n\nPass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message.";
+  "\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
 const REQUEST_CAPABILITY_SENTENCE =
   "If no tool can do what the user asks, call request_capability.";
 
@@ -541,7 +616,7 @@ test("a long description gets the full hint, then the telemetry sentence, then n
     const sentenceOnly = `${fullFits}a`;
     assert.equal(
       appendTelemetryHint(sentenceOnly, { requestCapability }),
-      `${sentenceOnly}${TELEMETRY_SENTENCE_HINT}`,
+      requestCapability ? `${sentenceOnly}${TELEMETRY_SENTENCE_HINT}` : sentenceOnly,
     );
     const sentenceFits = "a".repeat(MAX_TOOL_DESCRIPTION_LENGTH - TELEMETRY_SENTENCE_HINT.length);
     assert.equal(
@@ -552,7 +627,7 @@ test("a long description gets the full hint, then the telemetry sentence, then n
     assert.equal(appendTelemetryHint(nothingFits, { requestCapability }), nothingFits);
   }
   // Length is counted in UTF-8 bytes: "é" is one character but two bytes.
-  const accented = "é".repeat(440); // 440 characters, 880 bytes
+  const accented = "é".repeat(Math.floor((MAX_TOOL_DESCRIPTION_LENGTH - TELEMETRY_SENTENCE_HINT.length) / 2));
   assert.ok(accented.length + TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY.length <= MAX_TOOL_DESCRIPTION_LENGTH);
   assert.equal(
     appendTelemetryHint(accented, { requestCapability: true }),
@@ -564,7 +639,9 @@ test("hinting is idempotent, including after a telemetry-sentence-only fallback"
   for (const length of [10, 900, 950, 1000]) {
     const once = appendTelemetryHint("a".repeat(length), { requestCapability: true });
     assert.equal(appendTelemetryHint(once, { requestCapability: true }), once);
-    assert.equal(appendTelemetryHint(once, { requestCapability: false }), once);
+    const withoutCapability = appendTelemetryHint(once, { requestCapability: false });
+    assert.equal(appendTelemetryHint(withoutCapability, { requestCapability: false }), withoutCapability);
+    assert.ok(Buffer.byteLength(withoutCapability ?? "", "utf8") <= MAX_TOOL_DESCRIPTION_LENGTH);
   }
 });
 
@@ -591,7 +668,7 @@ test("a too-long description keeps its telemetry field and warns once per tool",
     };
     const shortened = {
       name: "shortened_hint_tool",
-      description: "y".repeat(MAX_TOOL_DESCRIPTION_LENGTH - 150),
+      description: "y".repeat(MAX_TOOL_DESCRIPTION_LENGTH - TELEMETRY_SENTENCE_HINT.length),
       inputSchema: { type: "object", properties: {} },
     };
     const [decorated, partial] = recorder.decorateDefinitions([tooLong, shortened]);

@@ -8,7 +8,9 @@ import {
   applyTelemetryFieldMap,
   buildToolCallEvent,
   createAnalyticsRecorder,
+  createTelemetryJsonSchema,
   extractTelemetryArguments,
+  normalizeTelemetryArgs,
   planToolTelemetry,
   prepareForPreview,
   sanitizeValue,
@@ -173,6 +175,60 @@ test("captureTelemetry default decorates schema and appends the hint (injected m
     plan.applyDescription("Find things.") ?? "",
     /telemetry\.user_intent/,
   );
+});
+
+test("advertised task context asks for a public action and accepts omitted fields", () => {
+  const schema = createTelemetryJsonSchema();
+  assert.deepEqual(Object.keys(schema.properties ?? {}), ["user_intent", "call_purpose", "user_frustration"]);
+  assert.equal(schema.required, undefined);
+  assert.doesNotMatch(JSON.stringify(schema), /agent_thinking|your reasoning|Always provide/i);
+  const plan = planToolTelemetry("search", { type: "object", properties: {} });
+  assert.match(plan.applyDescription("Search records.") ?? "", /Include telemetry\.call_purpose/);
+});
+
+test("call purpose wins over cached aliases, including an explicit blank", () => {
+  assert.deepEqual(normalizeTelemetryArgs({
+    call_purpose: "Find the record needed for the requested update.",
+    agent_thinking: "stale",
+    context: "older",
+  }), { agent_thinking: "Find the record needed for the requested update." });
+  assert.deepEqual(normalizeTelemetryArgs({ call_purpose: "", agent_thinking: "stale" }), { agent_thinking: "" });
+  assert.deepEqual(normalizeTelemetryArgs({ call_purpose: 7, agent_thinking: "cached" } as never), { agent_thinking: "cached" });
+  assert.deepEqual(normalizeTelemetryArgs({ context: "legacy" }), { agent_thinking: "legacy" });
+});
+
+test("call purpose field mapping preserves explicit values and legacy mappings", () => {
+  const args = { purpose: "mapped purpose", old: "mapped legacy" };
+  const map = { call_purpose: "purpose", agent_thinking: "old" };
+  assert.deepEqual(normalizeTelemetryArgs(applyTelemetryFieldMap(undefined, args, map)), { agent_thinking: "mapped purpose" });
+  assert.deepEqual(normalizeTelemetryArgs(applyTelemetryFieldMap({ call_purpose: "" }, args, map)), { agent_thinking: "" });
+  assert.deepEqual(normalizeTelemetryArgs(applyTelemetryFieldMap({ context: "explicit legacy" }, args, map)), { agent_thinking: "explicit legacy" });
+  assert.deepEqual(normalizeTelemetryArgs(applyTelemetryFieldMap(undefined, args, { agent_thinking: "old" })), { agent_thinking: "mapped legacy" });
+});
+
+test("public call purpose passes through redaction and capture-off on every recorder path", async () => {
+  for (const captureTelemetry of [true, false]) {
+    const batches: AnalyticsIngestBatch[] = [];
+    const recorder = createAnalyticsRecorder({ armature: {
+      captureTelemetry,
+      delivery: "await",
+      emit: (batch) => { batches.push(batch); },
+    } });
+    const received: unknown[] = [];
+    const invoke = recorder.tool({ name: "lookup", inputSchema: { type: "object", properties: {} } }, (args) => {
+      received.push(args);
+      return { ok: true };
+    });
+    await invoke({ telemetry: { call_purpose: "password=hunter2" } });
+    const event = batches.flatMap((batch) => batch.events).find((item) => item.kind === "tool_call");
+    assert.ok(event);
+    assert.deepEqual(received, [{}]);
+    const expected = captureTelemetry ? "password=[redacted:sensitive-kv]" : null;
+    assert.equal(event.metadata.agent_thinking, expected);
+    assert.equal(event.metadata.context, expected);
+    assert.equal("call_purpose" in event.metadata, false);
+    assert.doesNotMatch(JSON.stringify(batches), /hunter2/);
+  }
 });
 
 test("a tool that owns a top-level telemetry field is never decorated or stripped", () => {

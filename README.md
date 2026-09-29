@@ -79,7 +79,7 @@ const server = createMcpAnalyticsServer(createMyMcpServer);
 
 | Understand demand | Find what breaks | Improve with context |
 | --- | --- | --- |
-| See which tools and use cases people actually need. | Surface failures, retries, latency, and dead ends. | Connect every call to user intent and agent reasoning. |
+| See which tools and use cases people actually need. | Surface failures, retries, latency, and dead ends. | Connect every call to user intent and declared call purpose. |
 
 No custom event schema. No logging pipeline. No changes to your tool handlers.
 
@@ -97,7 +97,7 @@ No custom event schema. No logging pipeline. No changes to your tool handlers.
 Armature instruments the boundary around every tool call:
 
 1. The SDK adds an optional **telemetry** block to the tool’s input schema.
-2. The agent can attach user intent, reasoning, and frustration to the call.
+2. The agent can attach user intent, call purpose, and expressed frustration to the call.
 3. The SDK removes telemetry before your handler receives the arguments.
 4. Timing, outcome, and truncated previews are sent to your dashboard.
 
@@ -105,13 +105,25 @@ Armature instruments the boundary around every tool call:
 {
   "telemetry": {
     "user_intent": "Check whether the customer's last payment succeeded",
-    "agent_thinking": "The payment lookup tool provides the requested status",
+    "call_purpose": "The payment lookup tool provides the requested status",
     "user_frustration": "low"
   }
 }
 ~~~
 
-All telemetry fields are optional. Send **agent_thinking** on every call; send **user_intent** and **user_frustration** only on the first call after each new user message. Their absence on later calls means the same turn continues. The earlier **intent**, **context**, and **frustration_level** names remain accepted, while cached **user_turn** values are ignored.
+All telemetry fields are optional. Include **call_purpose** with a short public
+description of the action. Send **user_intent** and **user_frustration** only
+on the first call after each new user message. Their absence on later calls
+means the same turn continues.
+
+The earlier **agent_thinking**, **intent**, **context**, and
+**frustration_level** names remain accepted. Cached **user_turn** values are
+ignored. **call_purpose** takes precedence over **agent_thinking** and
+**context**, including an explicit empty string. It describes the visible
+action and its relation to the stated goal.
+
+The SDK stores its sanitized value under **agent_thinking** and **context**
+for compatibility. Existing redaction hooks and readers keep working.
 
 > **Privacy:** Armature is observability, not authentication. Keep your existing MCP authentication and authorization in place. Do not put secrets in tool arguments or telemetry fields.
 
@@ -218,7 +230,7 @@ Honest limitations, dictated by what fastmcp exposes to `execute`:
 - **Tool schemas are not decorated by default** with the optional `telemetry` block (fastmcp validates opaque Standard Schema objects before `execute`, advertising `additionalProperties: false`), so agent-supplied conversation telemetry generally cannot arrive unless you opt in with `declareTelemetry: true` (below). If a `telemetry` argument does reach `execute` (for example a passthrough Zod object), it is stripped and exported per the usual contract, and a schema that declares its own top-level `telemetry` field keeps owning it.
 - `tool.timeoutMs` races outside `execute`: on timeout fastmcp answers with its own error result while the analytics event records the real handler outcome and duration.
 
-**`declareTelemetry: true`** (in the same options object) restores v1 parity for telemetry schema advertisement, matching the `/v2` adapter option of the same name: each instrumented tool's **advertised** input schema gains the optional `telemetry` property (byte-identical descriptions to the v1 integration) and the same description nudge, so fresh-schema clients are told to send `telemetry.user_intent` / `telemetry.agent_thinking`. Because fastmcp regenerates the advertised schema from the `parameters` Standard Schema it holds privately, decoration happens on the tool definition's `parameters` before `addTool` — Zod object parameters are extended with the telemetry field (fastmcp's own pre-execute validation then keeps it), and `jsonSchemaAdapter` parameters are re-wrapped so the advertised JSON declares `telemetry` and validation accepts it while delegating everything else to your original validator. The wrapper then strips the argument before `execute` and exports it (armature-owned, never customer-owned — ownership is resolved against the original schema before decoration).
+**`declareTelemetry: true`** (in the same options object) restores v1 parity for telemetry schema advertisement, matching the `/v2` adapter option of the same name: each instrumented tool's **advertised** input schema gains the optional `telemetry` property (byte-identical descriptions to the v1 integration) and the same description nudge, so fresh-schema clients are told to send `telemetry.user_intent` / `telemetry.call_purpose`. Because fastmcp regenerates the advertised schema from the `parameters` Standard Schema it holds privately, decoration happens on the tool definition's `parameters` before `addTool` — Zod object parameters are extended with the telemetry field (fastmcp's own pre-execute validation then keeps it), and `jsonSchemaAdapter` parameters are re-wrapped so the advertised JSON declares `telemetry` and validation accepts it while delegating everything else to your original validator. The wrapper then strips the argument before `execute` and exports it (armature-owned, never customer-owned — ownership is resolved against the original schema before decoration).
 
 ~~~ts
 server.addTool(withFastmcpAnalytics(tool, { ...analyticsOptions, declareTelemetry: true }));
@@ -344,7 +356,7 @@ instrumentedFactory(buildServer, analyticsConfig, {
 });
 ~~~
 
-**`declareTelemetry: true`** restores v1 parity for telemetry schema advertisement (superseding the default no-decoration behavior described above): each instrumented tool's **advertised** input schema gains the optional `telemetry` property (byte-identical descriptions to the v1 integration) and the same description nudge, so fresh-schema v2 clients are told to send `telemetry.user_intent` / `telemetry.agent_thinking`. Mechanism: the adapter reads the SDK's own JSON conversion of the tool's schema (`toolInputSchemaJson` — works for any Standard Schema vendor: zod v4, arktype, valibot, `fromJsonSchema`), adds the telemetry property to that JSON, wraps it with `fromJsonSchema`, and swaps it in through `RegisteredTool.update({ paramsSchema })`. Because the SDK validates arguments against the registered schema *before* the analytics wrapper runs, this is what makes a sent `telemetry` argument pass validation; the wrapper then strips it from the customer arguments and exports it (armature-owned, never customer-owned — ownership is resolved against the original schema before decoration).
+**`declareTelemetry: true`** restores v1 parity for telemetry schema advertisement (superseding the default no-decoration behavior described above): each instrumented tool's **advertised** input schema gains the optional `telemetry` property (byte-identical descriptions to the v1 integration) and the same description nudge, so fresh-schema v2 clients are told to send `telemetry.user_intent` / `telemetry.call_purpose`. Mechanism: the adapter reads the SDK's own JSON conversion of the tool's schema (`toolInputSchemaJson` — works for any Standard Schema vendor: zod v4, arktype, valibot, `fromJsonSchema`), adds the telemetry property to that JSON, wraps it with `fromJsonSchema`, and swaps it in through `RegisteredTool.update({ paramsSchema })`. Because the SDK validates arguments against the registered schema *before* the analytics wrapper runs, this is what makes a sent `telemetry` argument pass validation; the wrapper then strips it from the customer arguments and exports it (armature-owned, never customer-owned — ownership is resolved against the original schema before decoration).
 
 - A top-level `additionalProperties: false` in your schema is preserved: `telemetry` becomes a *declared* property (so it validates), while every other undeclared key is still rejected exactly as before.
 - Tradeoff (why this is opt-in): validation then runs against the JSON Schema projection of your schema, via the SDK's Ajv validator. Zod runtime effects that don't survive that projection — `.transform()`, `.refine()`, applied `.default()` values — no longer run inside the SDK's validation step. If your tools rely on those, leave `declareTelemetry` off (a telemetry argument sent by a client is still stripped and exported).
@@ -391,7 +403,7 @@ type McpAnalyticsConfig = {
     redact?: (value: unknown) => unknown;
     redactEvent?: (event) => typeof event | null | Promise<typeof event | null>;
     schedule?: (work: Promise<void>) => void;
-    telemetryFieldMap?: { user_intent?: string; agent_thinking?: string; user_frustration?: string };
+    telemetryFieldMap?: { user_intent?: string; call_purpose?: string; user_frustration?: string };
     requestCapability?: boolean;
   };
 };
@@ -476,7 +488,7 @@ sequenceDiagram
 
 ### Telemetry capture and privacy
 
-The SDK injects an optional `telemetry` object (`user_intent`, `agent_thinking`, `user_frustration`) into each wrapped tool's input schema. This is conversation-derived data: if your deployment cannot disclose it — for example in a privacy policy required for an app-store submission — set **captureTelemetry: false**. With capture off, tool schemas and descriptions pass through completely untouched, and telemetry sent by clients holding an older cached schema is stripped and never delivered anywhere (ingest, `emit`, or `onError`). Tool-call and session analytics keep working without the conversational fields.
+The SDK injects an optional `telemetry` object (`user_intent`, `call_purpose`, `user_frustration`) into each wrapped tool's input schema. This is conversation-derived data: if your deployment cannot disclose it — for example in a privacy policy required for an app-store submission — set **captureTelemetry: false**. With capture off, tool schemas and descriptions pass through completely untouched, and telemetry sent by clients holding an older cached schema is stripped and never delivered anywhere (ingest, `emit`, or `onError`). Tool-call and session analytics keep working without the conversational fields.
 
 Disclosure summary for privacy policies: with capture **on**, the SDK collects tool names, tool call inputs/outputs (size-capped previews), error messages, timing, a one-way hash of the actor seed, the verbatim `actorIdentifier` when configured, client name/version, and the agent-supplied `telemetry` fields above; recipients are your Armature workspace. With capture **off**, the `telemetry` fields are not collected.
 

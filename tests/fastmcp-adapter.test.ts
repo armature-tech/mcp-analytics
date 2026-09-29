@@ -21,7 +21,7 @@ import {
 import type { AnalyticsIngestBatch } from "../src/types.js";
 import { __resetProcessScopedSessionIdForTests } from "../src/stdio-session.js";
 import {
-  AGENT_THINKING_DESCRIPTION,
+  CALL_PURPOSE_DESCRIPTION,
   TELEMETRY_PROPERTY_DESCRIPTION,
   USER_INTENT_DESCRIPTION,
 } from "../src/schema.js";
@@ -474,8 +474,8 @@ test("fastmcp declareTelemetry: zod tools advertise telemetry (byte-identical wo
       USER_INTENT_DESCRIPTION,
     );
     assert.equal(
-      telemetry.properties?.agent_thinking?.description,
-      AGENT_THINKING_DESCRIPTION,
+      telemetry.properties?.call_purpose?.description,
+      CALL_PURPOSE_DESCRIPTION,
     );
     // telemetry stays optional; fastmcp's strictJsonSchema still advertises a
     // closed top level, where the now-declared telemetry passes.
@@ -484,7 +484,7 @@ test("fastmcp declareTelemetry: zod tools advertise telemetry (byte-identical wo
     const listed = await client.listTools();
     assert.match(
       String(listed.tools.find((t) => t.name === "echo")?.description),
-      /telemetry\.agent_thinking/,
+      /telemetry\.call_purpose/,
       "description carries the telemetry nudge",
     );
 
@@ -492,7 +492,7 @@ test("fastmcp declareTelemetry: zod tools advertise telemetry (byte-identical wo
       name: "echo",
       arguments: {
         msg: "m",
-        telemetry: { user_intent: "declared round trip", agent_thinking: "reasoning" },
+        telemetry: { user_intent: "declared round trip", call_purpose: "action purpose" },
       },
     });
     assert.deepEqual(received, { msg: "m" }, "telemetry stripped before execute");
@@ -500,7 +500,7 @@ test("fastmcp declareTelemetry: zod tools advertise telemetry (byte-identical wo
       (e) => e.kind === "tool_call" && e.metadata.tool_name === "echo",
     );
     assert.equal(withTelemetry?.metadata.user_intent, "declared round trip");
-    assert.equal(withTelemetry?.metadata.agent_thinking, "reasoning");
+    assert.equal(withTelemetry?.metadata.agent_thinking, "action purpose");
 
     // Absent telemetry keeps working exactly as before.
     const bare = await client.callTool({ name: "echo", arguments: { msg: "plain" } });

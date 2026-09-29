@@ -16,7 +16,7 @@ import {
 } from "../src/schema.js";
 
 const TELEMETRY_DESCRIPTION_HINT =
-  "On every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.";
+  "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];

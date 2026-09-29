@@ -65,7 +65,7 @@ test("wrapMastraTools preserves id and unrelated tool properties, nudges the des
   // nudge (ARM-24), like every other integration shape.
   assert.equal(
     wrapped.echo?.description,
-    "Echo back.\n\nOn every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.",
+    "Echo back.\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.",
   );
   assert.equal(wrapped.echo?.annotations, annotations);
   assert.notEqual(wrapped.echo?.execute, tools.echo?.execute);

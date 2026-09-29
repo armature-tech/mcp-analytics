@@ -88,6 +88,8 @@ export type TelemetryFieldMap = {
   /** @deprecated `user_turn` is no longer collected; this mapping is ignored. */
   user_turn?: string;
   user_intent?: string;
+  call_purpose?: string;
+  /** @deprecated Accepted for compatibility. Prefer call_purpose. */
   agent_thinking?: string;
   user_frustration?: string;
 };
@@ -105,7 +107,7 @@ export type McpAnalyticsConfig = {
     onError?: (error: unknown, batch: AnalyticsIngestBatch) => void;
     timeoutMs?: number;
     // Master switch for conversation-derived telemetry (user_intent,
-    // agent_thinking, user_frustration). Default true. When false
+    // call_purpose, user_frustration). Default true. When false
     // the SDK injects no `telemetry` schema field, appends no description
     // nudges, and never exports telemetry values — including values sent by
     // clients holding a cached schema, which are stripped and dropped.
@@ -152,6 +154,8 @@ export type TelemetryArgs = {
   /** @deprecated `user_turn` is accepted from cached clients but ignored. */
   user_turn?: number;
   user_intent?: string;
+  call_purpose?: string;
+  /** @deprecated Accepted for compatibility. Prefer call_purpose. */
   agent_thinking?: string;
   user_frustration?: "low" | "medium" | "high";
   /** @deprecated Pre-V1 spelling of `user_intent`; still accepted. */

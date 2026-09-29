@@ -42,6 +42,11 @@ implementation and acceptance contract is recorded in the
 | Deployed Claude Code and Codex isolation canary | Yes | Yes | Yes | Yes |
 | Batch `sdk` identity from real package metadata | Yes | Yes | Yes | Yes |
 
+The public telemetry schema contains `user_intent`, `call_purpose`, and
+`user_frustration` in all four SDKs. `call_purpose` describes an observable
+action. Cached `agent_thinking` and `context` inputs remain accepted.
+The event storage keys stay unchanged for compatibility.
+
 ## Intentional differences
 
 - TypeScript supports MCP SDK and Mastra registration shapes; Python supports

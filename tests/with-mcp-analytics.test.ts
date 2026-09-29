@@ -17,10 +17,10 @@ import {
 } from "../src/schema.js";
 
 const TELEMETRY_DESCRIPTION_HINT =
-  "On every call, pass telemetry.agent_thinking with your reasoning for this specific call. Pass telemetry.user_intent only on the first tool call after a new user message.";
+  "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
 // Emitted instead when the SDK exposes request_capability (delivery configured).
 const TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY =
-  "Pass telemetry.agent_thinking on every call, telemetry.user_intent on the first call after each user message. If no tool can do what the user asks, call request_capability.";
+  "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message. If no tool can do what the user asks, call request_capability.";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];

@@ -85,7 +85,7 @@ Agent sees:
   name?: string,
   telemetry: {
     user_intent?: string,
-    agent_thinking?: string,
+    call_purpose?: string,
     user_frustration?: "low" | "medium" | "high"
   }
 }

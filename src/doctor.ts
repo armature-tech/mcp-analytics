@@ -11,8 +11,11 @@ import {
 
 const DEFAULT_INGEST_URL = "https://app.armature.tech/api/mcp-analytics/ingest";
 const DEFAULT_TIMEOUT_MS = 10_000;
-const CURRENT_TELEMETRY_MARKER = "Conversation telemetry.";
+const CURRENT_TELEMETRY_MARKER = "Optional task context for usage analytics";
 const LEGACY_TELEMETRY_MARKERS = [
+  "Pass telemetry.agent_thinking",
+  "On every call, pass telemetry.agent_thinking",
+  "Conversation telemetry.",
   "Pass telemetry.user_intent",
   "Pass telemetry.intent",
 ];
@@ -245,7 +248,7 @@ export const classifyToolInstrumentation = (
   const toolDescription = tool.description || "";
 
   if (
-    "agent_thinking" in properties
+    "call_purpose" in properties
     && "user_intent" in properties
     && telemetryDescription.includes(CURRENT_TELEMETRY_MARKER)
   ) {
@@ -253,7 +256,8 @@ export const classifyToolInstrumentation = (
   }
 
   if (
-    "intent" in properties
+    "agent_thinking" in properties
+    || "intent" in properties
     || "context" in properties
     || LEGACY_TELEMETRY_MARKERS.some((marker) => toolDescription.includes(marker))
   ) {
@@ -512,7 +516,7 @@ export const runDoctor = async (
               "tool-wrapping",
               "Telemetry capture",
               "No Armature telemetry fields are advertised, as requested. "
-                + `Tool-call and session analytics still flow; capturing user_intent/agent_thinking requires wrapping tools with ${wrapApiFor(detectedLanguage)}.`,
+                + `Tool-call and session analytics still flow; capturing user_intent/call_purpose requires wrapping tools with ${wrapApiFor(detectedLanguage)}.`,
             )
           : warn(
               "tool-wrapping",

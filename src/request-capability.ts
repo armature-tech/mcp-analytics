@@ -10,7 +10,7 @@ export const REQUEST_CAPABILITY_DESCRIPTION =
   "Request a capability that is not provided by the currently available tools. Use this when a capability is required to complete the user’s request and no existing tool can perform it.";
 
 export const REQUEST_CAPABILITY_ARGUMENT_DESCRIPTION =
-  "The capability required to complete the user's request. Omit argument values, PII, and secrets. Use English.";
+  "One English sentence describing the missing capability needed for the user's task. Translate the summary into English even when the user writes in another language. Describe generic actions and roles. Omit names, contacts, IDs, credentials and all tool argument values.";
 
 export const REQUEST_CAPABILITY_INPUT_SCHEMA: JsonObjectSchema = {
   type: "object",

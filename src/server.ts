@@ -341,7 +341,7 @@ export const withMcpAnalytics = <ServerFactoryResult>(
       // hint changes.
       tool.description = tool.description === hint.hintedDescription
         ? hint.fallbackDescription
-        : withoutRequestCapabilityHint(tool.description, hint.toolName);
+        : withoutRequestCapabilityHint(tool.description, hint.toolName, hint.hintedDescription);
     }
   }
   ctx.requestCapabilityHints.length = 0;
