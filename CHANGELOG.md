@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Level of the description-length notice
+
+`armature.descriptionLengthLogLevel` (`"none"`, `"debug"`, `"info"` or
+`"warning"`, the default) sets how the one-time notice for a tool description
+too long for the full telemetry hint is logged: `console.debug`, `console.info`,
+`console.warn`, or not at all. In runtimes with a stderr stream (Node, Bun,
+Deno), `"debug"` and `"info"` write to stderr instead of `console.debug` and
+`console.info`, which write to stdout and would corrupt a stdio server's
+JSON-RPC stream.
+
 ### `request_capability` is worded so agents call it
 
 Its description now says it records the request, changes no data and contacts

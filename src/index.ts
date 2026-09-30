@@ -6,6 +6,7 @@ export type {
   AnalyticsIngestBatch,
   AnalyticsIngestEvent,
   AnalyticsRecorder,
+  DescriptionLengthLogLevel,
   ExtractedToolArguments,
   HeaderBag,
   InstrumentToolCallEvent,

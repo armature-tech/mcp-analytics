@@ -16,7 +16,7 @@ import {
   planToolTelemetry,
   withoutRequestCapabilityHint,
 } from "./schema.js";
-import type { TelemetryMode } from "./types.js";
+import type { DescriptionLengthLogLevel, TelemetryMode } from "./types.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
 import { deriveToolResultError, isRecord } from "./utils.js";
 import {
@@ -42,6 +42,7 @@ type WithAnalyticsContext = {
     // What we registered; a different value later means the factory updated it.
     hintedDescription: string | undefined;
     fallbackDescription: string | undefined;
+    logLevel: DescriptionLengthLogLevel | undefined;
   }>;
 };
 
@@ -249,7 +250,9 @@ const installPrototypePatchOnce = () => {
         hintedDescription: description,
         fallbackDescription: appendTelemetryHint(toolConfig.description, {
           toolName: name,
+          logLevel: config.armature?.descriptionLengthLogLevel,
         }),
+        logLevel: config.armature?.descriptionLengthLogLevel,
       });
     }
     return registered;
@@ -341,7 +344,7 @@ export const withMcpAnalytics = <ServerFactoryResult>(
       // hint changes.
       tool.description = tool.description === hint.hintedDescription
         ? hint.fallbackDescription
-        : withoutRequestCapabilityHint(tool.description, hint.toolName, hint.hintedDescription);
+        : withoutRequestCapabilityHint(tool.description, hint.toolName, hint.hintedDescription, hint.logLevel);
     }
   }
   ctx.requestCapabilityHints.length = 0;

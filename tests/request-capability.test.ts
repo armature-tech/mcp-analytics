@@ -655,6 +655,44 @@ test("a description that already asks for request_capability only gets the telem
   );
 });
 
+test("descriptionLengthLogLevel sets the level of the too-long notice and keeps it off stdout", () => {
+  const seen: Array<[string, string]> = [];
+  const original = { debug: console.debug, info: console.info, log: console.log, warn: console.warn };
+  const originalWrite = process.stderr.write;
+  console.debug = (message?: unknown) => { seen.push(["console.debug", String(message)]); };
+  console.info = (message?: unknown) => { seen.push(["console.info", String(message)]); };
+  console.log = (message?: unknown) => { seen.push(["console.log", String(message)]); };
+  console.warn = (message?: unknown) => { seen.push(["console.warn", String(message)]); };
+  process.stderr.write = ((chunk: unknown) => {
+    seen.push(["stderr", String(chunk)]);
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    for (const level of ["debug", "info", "none"] as const) {
+      const recorder = createAnalyticsRecorder({
+        armature: { emit: () => undefined, descriptionLengthLogLevel: level },
+      });
+      const tool = {
+        name: `long_tool_${level}`,
+        description: "z".repeat(MAX_TOOL_DESCRIPTION_LENGTH - TELEMETRY_SENTENCE_HINT.length),
+        inputSchema: { type: "object", properties: {} },
+      };
+      const [decorated] = recorder.decorateDefinitions([tool]);
+      recorder.decorateDefinitions([tool]);
+      assert.equal(decorated?.description, `${tool.description}${TELEMETRY_SENTENCE_HINT}`);
+    }
+    const notice = (name: string) =>
+      `[mcp-analytics] Tool "${name}" description is too long for the full Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; appended only the telemetry sentence.`;
+    assert.deepEqual(seen, [
+      ["stderr", `${notice("long_tool_debug")}\n`],
+      ["stderr", `${notice("long_tool_info")}\n`],
+    ]);
+  } finally {
+    Object.assign(console, original);
+    process.stderr.write = originalWrite;
+  }
+});
+
 test("a too-long description keeps its telemetry field and warns once per tool", () => {
   const warnings: string[] = [];
   const originalWarn = console.warn;

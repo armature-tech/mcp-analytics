@@ -549,7 +549,10 @@ const wrapFastmcpTool = <T extends FastmcpToolLike>(
     ...tool,
     parameters: decoratedParameters,
     // Same idempotent description nudge as the v1/v2 integrations (ARM-24).
-    description: appendTelemetryHint(tool.description, { toolName: tool.name }),
+    description: appendTelemetryHint(tool.description, {
+      toolName: tool.name,
+      logLevel: state.config.armature?.descriptionLengthLogLevel,
+    }),
     execute: wrappedExecute,
   } as T;
 };

@@ -7,6 +7,7 @@ import type {
   TelemetryArgs,
   TelemetryFieldMap,
   TelemetryMode,
+  DescriptionLengthLogLevel,
 } from "./types.js";
 import { isRequestCapabilityEnabled } from "./request-capability.js";
 import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
@@ -46,11 +47,26 @@ const utf8 = new TextEncoder();
 const fits = (text: string) => utf8.encode(text).length <= MAX_TOOL_DESCRIPTION_LENGTH;
 
 const warnedLongDescriptions = new Set<string>();
-const warnDescriptionTooLong = (toolName: string, message: string) => {
-  if (warnedLongDescriptions.has(toolName)) return;
+const warnDescriptionTooLong = (
+  toolName: string,
+  message: string,
+  level: DescriptionLengthLogLevel = "warning",
+) => {
+  if (level === "none" || warnedLongDescriptions.has(toolName)) return;
   warnedLongDescriptions.add(toolName);
+  const text = `[mcp-analytics] Tool "${toolName}" description is too long ${message}`;
+  // Node's console.debug and console.info write to stdout, which carries
+  // JSON-RPC for stdio servers. Where the runtime has a stderr stream, every
+  // level goes there; elsewhere (Workers, browsers) the console method
+  // carries the level.
+  const stderr = typeof process !== "undefined" ? process.stderr : undefined;
   // eslint-disable-next-line no-console
-  console.warn(`[mcp-analytics] Tool "${toolName}" description is too long ${message}`);
+  if (level === "warning") console.warn(text);
+  else if (typeof stderr?.write === "function") stderr.write(`${text}\n`);
+  // eslint-disable-next-line no-console
+  else if (level === "debug") console.debug(text);
+  // eslint-disable-next-line no-console
+  else console.info(text);
 };
 
 // Appends the current telemetry hint and upgrades exact SDK hint suffixes.
@@ -65,7 +81,11 @@ const warnDescriptionTooLong = (toolName: string, message: string) => {
 // are never cut, and the telemetry field is still advertised either way.
 export const appendTelemetryHint = (
   description: string | undefined,
-  options: { requestCapability?: boolean; toolName?: string } = {},
+  options: {
+    requestCapability?: boolean;
+    toolName?: string;
+    logLevel?: DescriptionLengthLogLevel;
+  } = {},
 ) => {
   const requestCapability = options.requestCapability === true;
   if (description === undefined) {
@@ -104,6 +124,7 @@ export const appendTelemetryHint = (
       warnDescriptionTooLong(
         options.toolName,
         `for the full Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; appended only the telemetry sentence.`,
+        options.logLevel,
       );
     }
     return `${description}${TELEMETRY_SENTENCE_HINT}`;
@@ -112,6 +133,7 @@ export const appendTelemetryHint = (
     warnDescriptionTooLong(
       options.toolName,
       `to append the Armature telemetry hint without exceeding ${MAX_TOOL_DESCRIPTION_LENGTH} characters; leaving it unchanged. Telemetry is still collected.`,
+      options.logLevel,
     );
   }
   return description;
@@ -122,6 +144,7 @@ export const withoutRequestCapabilityHint = (
   description: string | undefined,
   toolName?: string,
   registeredDescription?: string,
+  logLevel?: DescriptionLengthLogLevel,
 ) => {
   if (description !== undefined) {
     // The last paragraph is the SDK suffix, even when an earlier customer
@@ -156,14 +179,15 @@ export const withoutRequestCapabilityHint = (
       if (fits(updated)) return updated;
       if (toolName !== undefined) {
         warnDescriptionTooLong(toolName,
-          `to keep the Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; removed it. Telemetry is still collected.`);
+          `to keep the Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; removed it. Telemetry is still collected.`,
+          logLevel);
       }
       return index === 0
         ? description.slice(marker.length).trimStart()
         : description.slice(0, index - 2) + description.slice(index + marker.length);
     }
   }
-  return appendTelemetryHint(description, toolName === undefined ? {} : { toolName });
+  return appendTelemetryHint(description, toolName === undefined ? { logLevel } : { toolName, logLevel });
 };
 export const USER_INTENT_DESCRIPTION =
   "Generalized one-sentence summary of the task stated in the user's latest message. Describe actions and generic roles only. Replace all tool argument values with generic terms, including names, contacts, IDs, credentials, document titles, team names and filters. For example, 'List employees in the selected team.' Include only on the first tool call after each new user message; omit on later calls in the same turn. Use English.";
@@ -333,6 +357,7 @@ export const planToolTelemetry = (
       appendTelemetryHint(description, {
         requestCapability: options.requestCapability ?? isRequestCapabilityEnabled(config),
         toolName,
+        logLevel: config.armature?.descriptionLengthLogLevel,
       }),
   };
 };

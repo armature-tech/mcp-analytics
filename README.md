@@ -454,7 +454,12 @@ tool description also tells agents to call `request_capability` when no tool
 can do what the user asks. The SDK never pushes a description past 1024
 characters (UTF-8 bytes): if the full hint does not fit, it appends only the
 telemetry sentence, and if that does not fit either, it leaves the description
-unchanged and logs a warning.
+unchanged and logs a warning. Either notice is logged once per tool with
+`console.warn`; set **descriptionLengthLogLevel** to `"info"`, `"debug"` or
+`"none"` to log it at a lower level or not at all. Every level writes to
+stderr where the runtime has one (Node, Bun, Deno), so stdio servers keep
+stdout for JSON-RPC; `"info"` and `"debug"` use `console.info` and
+`console.debug` only in runtimes without stderr, such as Workers.
 
 ```mermaid
 sequenceDiagram

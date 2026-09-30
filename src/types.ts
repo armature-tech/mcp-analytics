@@ -124,8 +124,15 @@ export type McpAnalyticsConfig = {
     // absent from the server's current tool set. On by default (when a
     // delivery path is configured); set to false to disable.
     requestCapability?: boolean;
+    /**
+     * Level of the one-time notice for a tool description too long for the
+     * full telemetry hint: "none", "debug", "info" or "warning" (default).
+     */
+    descriptionLengthLogLevel?: DescriptionLengthLogLevel;
   };
 };
+
+export type DescriptionLengthLogLevel = "none" | "debug" | "info" | "warning";
 
 // How an instrumented tool handles the `telemetry` argument field. Resolved
 // once per tool at registration (see planToolTelemetry): `injected` — we added
