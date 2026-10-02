@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Annotations on request_capability
+
+`request_capability` now declares tool annotations: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false` and the title "Request capability". The ChatGPT app directory holds an app update when a tool lacks explicit `readOnlyHint`, `destructiveHint` and `openWorldHint`.
+
 ### Level of the description-length notice
 
 `armature.descriptionLengthLogLevel` (`"none"`, `"debug"`, `"info"` or

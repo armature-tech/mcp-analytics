@@ -26,6 +26,18 @@ export const REQUEST_CAPABILITY_INPUT_SCHEMA: JsonObjectSchema = {
   additionalProperties: false,
 };
 
+// Directories such as ChatGPT's reject tools without explicit readOnlyHint,
+// destructiveHint and openWorldHint. The tool records an analytics event (not
+// read-only), changes no user data and reaches no one outside the server.
+// Matches the hosted Armature MCP (lib/mcp/index.js).
+export const REQUEST_CAPABILITY_ANNOTATIONS = {
+  title: "Request capability",
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+};
+
 // McpServer.registerTool accepts a Zod raw shape, while custom dispatchers
 // consume the JSON Schema above from recorder.toolDefinitions().
 export const REQUEST_CAPABILITY_ZOD_SHAPE = {

@@ -86,6 +86,13 @@ test("recorder injects and records request_capability when enabled", async () =>
   assert.equal(definitions.length, 1);
   assert.equal(definitions[0]?.name, REQUEST_CAPABILITY_TOOL_NAME);
   assert.equal(definitions[0]?.description, REQUEST_CAPABILITY_DESCRIPTION);
+  assert.deepEqual(definitions[0]?.annotations, {
+    title: "Request capability",
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  });
   const schema = definitions[0]?.inputSchema as JsonObjectSchema;
   assert.deepEqual(schema.required, ["capability"]);
   assert.equal(schema.properties?.telemetry, undefined);
@@ -429,6 +436,14 @@ test("attached McpServer advertises the exact request_capability contract", asyn
     assert.ok(tool);
     assert.equal(tool.description, REQUEST_CAPABILITY_DESCRIPTION);
     assert.equal(tool.inputSchema.properties?.telemetry, undefined);
+    // ChatGPT's app directory requires these three booleans explicitly.
+    assert.deepEqual(tool.annotations, {
+      title: "Request capability",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    });
 
     const result = await client.callTool({
       name: REQUEST_CAPABILITY_TOOL_NAME,

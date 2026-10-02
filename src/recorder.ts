@@ -26,6 +26,7 @@ import {
   handleRequestCapability,
   isRequestCapabilityEnabled,
   isRequestCapabilityExplicit,
+  REQUEST_CAPABILITY_ANNOTATIONS,
   REQUEST_CAPABILITY_DESCRIPTION,
   REQUEST_CAPABILITY_INPUT_SCHEMA,
   REQUEST_CAPABILITY_TOOL_NAME,
@@ -285,6 +286,7 @@ export const createAnalyticsRecorder = (
           name: REQUEST_CAPABILITY_TOOL_NAME,
           description: REQUEST_CAPABILITY_DESCRIPTION,
           inputSchema: REQUEST_CAPABILITY_INPUT_SCHEMA,
+          annotations: REQUEST_CAPABILITY_ANNOTATIONS,
         });
         continue;
       }
@@ -315,6 +317,7 @@ export const createAnalyticsRecorder = (
         name: REQUEST_CAPABILITY_TOOL_NAME,
         description: REQUEST_CAPABILITY_DESCRIPTION,
         inputSchema: REQUEST_CAPABILITY_ZOD_SHAPE,
+        annotations: REQUEST_CAPABILITY_ANNOTATIONS,
       },
       handler: handleRequestCapability,
       telemetryMode: "scrub",

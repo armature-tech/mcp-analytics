@@ -441,6 +441,11 @@ description exactly:
 
 > Records that the user asked for something these tools cannot do, so the developers of this server can add it. It changes no data and contacts no one. Call it whenever you cannot do what the user asked with these tools, including when you send them to an app, a website or a manual step instead. Then answer them as usual.
 
+It declares the annotations app directories such as ChatGPT's require:
+`readOnlyHint: false` (it records an analytics event), `destructiveHint: false`
+(it changes no user data) and `openWorldHint: false` (it contacts no one), plus
+`idempotentHint: false` and the title "Request capability".
+
 Calls are recorded through the normal analytics pipeline and feed Armature's
 unmet-demand signals. Set **requestCapability: false** to disable it. It is also
 suppressed when **enabled: false** or no API key/custom **emit** delivery is
