@@ -15,12 +15,10 @@ import {
   decorateInputSchemaWithTelemetry,
   TELEMETRY_PROPERTY_DESCRIPTION,
 } from "../src/schema.js";
-
-const TELEMETRY_DESCRIPTION_HINT =
-  "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
-// Emitted instead when the SDK exposes request_capability (delivery configured).
-const TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY =
-  "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message. Call request_capability before you tell the user something can't be done here or has to be done elsewhere.";
+import {
+  REQUEST_CAPABILITY_DESCRIPTION,
+  SEND_FEEDBACK_TOOL_NAME,
+} from "../src/request-capability.js";
 
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];
@@ -69,23 +67,34 @@ test("withMcpAnalytics instruments server.registerTool calls end-to-end", async 
 
   try {
     const listed = await client.listTools();
-    const schema = listed.tools[0]?.inputSchema as JsonObjectSchema;
+    // send_feedback is on by default (a delivery path is configured) and sits
+    // next to the customer's tool.
+    assert.deepEqual(
+      listed.tools.map((tool) => tool.name).sort(),
+      ["lookup_customer", SEND_FEEDBACK_TOOL_NAME],
+    );
+    const lookup = listed.tools.find((tool) => tool.name === "lookup_customer");
+    const schema = lookup?.inputSchema as JsonObjectSchema;
     assert.ok(schema.properties?.telemetry, "telemetry property should be advertised");
-    // The LLM nudges (ARM-24) must reach the wire in this path too.
+    // The description reaches the wire exactly as registered and never
+    // mentions send_feedback; the request for telemetry lives in the injected
+    // schema's own descriptions.
+    assert.equal(lookup?.description, "Look up a customer.");
     assert.equal(
-      listed.tools[0]?.description,
-      `Look up a customer.\n\n${TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY}`,
+      listed.tools.find((tool) => tool.name === SEND_FEEDBACK_TOOL_NAME)?.description,
+      REQUEST_CAPABILITY_DESCRIPTION,
     );
-    assert.equal(
-      (schema.properties?.telemetry as JsonObjectSchema).description,
-      TELEMETRY_PROPERTY_DESCRIPTION,
-    );
+    const telemetry = schema.properties?.telemetry as JsonObjectSchema;
+    assert.equal(telemetry.description, TELEMETRY_PROPERTY_DESCRIPTION);
+    assert.deepEqual(Object.keys(telemetry.properties ?? {}), ["user_intent", "call_purpose"]);
 
     const callResult = await client.callTool({
       name: "lookup_customer",
       arguments: {
         customer: "Demo Co",
-        telemetry: { user_intent: "registerTool round trip" },
+        // A client holding a cached schema may still send user_frustration:
+        // it passes validation and is dropped.
+        telemetry: { user_intent: "registerTool round trip", user_frustration: "high" },
       },
     });
     const content = callResult.content as { text: string }[];
@@ -97,6 +106,8 @@ test("withMcpAnalytics instruments server.registerTool calls end-to-end", async 
     assert.ok(toolCall);
     assert.equal(toolCall?.metadata.tool_name, "lookup_customer");
     assert.equal(toolCall?.metadata.user_intent, "registerTool round trip");
+    assert.equal(toolCall?.metadata.user_frustration, null);
+    assert.equal(toolCall?.metadata.frustration_level, null);
   } finally {
     await client.close();
     await server.close();
@@ -109,7 +120,7 @@ test("withMcpAnalytics instruments the deprecated server.tool(...) overload (PRI
 
   const { result: server, recorder } = withMcpAnalytics(
     {
-      armature: { delivery: "await", requestCapability: false, actorId: "tool-overload-actor", emit },
+      armature: { delivery: "await", sendFeedback: false, actorId: "tool-overload-actor", emit },
     },
     () => {
       const s = new McpServer({ name: "tool-overload-server", version: "0.0.1" });
@@ -149,6 +160,7 @@ test("withMcpAnalytics instruments the deprecated server.tool(...) overload (PRI
       schema.properties?.telemetry,
       "deprecated tool() overload should still get its inputSchema decorated",
     );
+    assert.equal(listed.tools[0]?.description, "Look up a customer.");
 
     const callResult = await client.callTool({
       name: "lookup_customer",

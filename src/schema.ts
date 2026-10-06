@@ -9,7 +9,6 @@ import type {
   TelemetryMode,
   DescriptionLengthLogLevel,
 } from "./types.js";
-import { isRequestCapabilityEnabled } from "./request-capability.js";
 import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
 
 // Public task context is identical across all four SDKs. Legacy field names
@@ -17,14 +16,18 @@ import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
 export const TELEMETRY_PROPERTY_DESCRIPTION =
   "Optional task context for usage analytics, based on the visible user request and the action performed by this tool.";
 
-const TELEMETRY_DESCRIPTION_HINT = "\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
-const TELEMETRY_SENTENCE = TELEMETRY_DESCRIPTION_HINT.trimStart();
+// Earlier releases appended these sentences to every tool description. The SDK
+// no longer adds text to a tool description (TELEMETRY-CONTRACT.md, "Tool
+// descriptions"): what the agent is asked for lives in the injected
+// parameters' own descriptions, as in the PostHog and AgentCat SDKs.
+// Anthropic's connector directory review asked for exactly this. Exact SDK
+// suffixes from those releases are still removed, so a description registered
+// through an older wrapper or a cached factory comes out clean.
+const TELEMETRY_SENTENCE = "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
 const REQUEST_CAPABILITY_SENTENCE =
   "Call request_capability before you tell the user something can't be done here or has to be done elsewhere.";
-const TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY =
-  `${TELEMETRY_DESCRIPTION_HINT} ${REQUEST_CAPABILITY_SENTENCE}`;
-const TELEMETRY_SENTENCE_HINT = TELEMETRY_DESCRIPTION_HINT;
-// Only exact SDK suffixes are replaced. A mention within customer prose stays.
+// Only exact SDK suffixes are removed. A mention within customer prose stays.
+// Longer markers precede their shorter prefixes.
 const RECOGNIZED_HINT_MARKERS = [
   `${TELEMETRY_SENTENCE} ${REQUEST_CAPABILITY_SENTENCE}`,
   `${TELEMETRY_SENTENCE} If no tool can do what the user asks, call request_capability.`,
@@ -37,183 +40,60 @@ const RECOGNIZED_HINT_MARKERS = [
   "Pass telemetry.intent with a one-line user intent for analytics.",
 ];
 
-// Some providers reject the whole request when any tool description exceeds
-// 1024 characters (Azure OpenAI, some OpenAI-compatible gateways), and Claude
-// Code cuts descriptions at 2048, which would drop the hint first. Measured in
-// UTF-8 bytes, which never undercounts characters and matches the Python, Go,
-// and PHP SDKs exactly.
+/**
+ * Kept for compatibility: the SDK no longer appends anything to tool
+ * descriptions, so no description can grow past this because of us.
+ */
 export const MAX_TOOL_DESCRIPTION_LENGTH = 1024;
-const utf8 = new TextEncoder();
-const fits = (text: string) => utf8.encode(text).length <= MAX_TOOL_DESCRIPTION_LENGTH;
 
-const warnedLongDescriptions = new Set<string>();
-const warnDescriptionTooLong = (
-  toolName: string,
-  message: string,
-  level: DescriptionLengthLogLevel = "warning",
-) => {
-  if (level === "none" || warnedLongDescriptions.has(toolName)) return;
-  warnedLongDescriptions.add(toolName);
-  const text = `[mcp-analytics] Tool "${toolName}" description is too long ${message}`;
-  // Node's console.debug and console.info write to stdout, which carries
-  // JSON-RPC for stdio servers. Where the runtime has a stderr stream, every
-  // level goes there; elsewhere (Workers, browsers) the console method
-  // carries the level.
-  const stderr = typeof process !== "undefined" ? process.stderr : undefined;
-  // eslint-disable-next-line no-console
-  if (level === "warning") console.warn(text);
-  else if (typeof stderr?.write === "function") stderr.write(`${text}\n`);
-  // eslint-disable-next-line no-console
-  else if (level === "debug") console.debug(text);
-  // eslint-disable-next-line no-console
-  else console.info(text);
-};
-
-// Appends the current telemetry hint and upgrades exact SDK hint suffixes.
-// Every integration shape must run tool descriptions through this
-// so calling agents know to pass telemetry (ARM-24). With `requestCapability`,
-// the hint also points agents to request_capability.
-//
-// The result never exceeds MAX_TOOL_DESCRIPTION_LENGTH because of us: when the
-// full hint does not fit, only the telemetry sentence is appended (it matters
-// per tool; request_capability is a list-wide instruction other tools carry);
-// when that does not fit either, the description is left unchanged. Sentences
-// are never cut, and the telemetry field is still advertised either way.
-export const appendTelemetryHint = (
-  description: string | undefined,
-  options: {
-    requestCapability?: boolean;
-    toolName?: string;
-    logLevel?: DescriptionLengthLogLevel;
-  } = {},
-) => {
-  const requestCapability = options.requestCapability === true;
-  if (description === undefined) {
-    return (requestCapability
-      ? TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY
-      : TELEMETRY_DESCRIPTION_HINT).trimStart();
-  }
-  // Upgrade cached SDK suffixes before checking the size budget. Remove a
-  // full hint before its shorter forms, including stacked older wrappers.
+// Removes the SDK's own trailing hint paragraph(s), stacked older wrappers
+// included. A description that was only an SDK hint becomes empty; a tool with
+// no description keeps none.
+export const stripSdkDescriptionHint = (description: string | undefined) => {
+  if (description === undefined) return undefined;
   let base = description;
   for (;;) {
     const trimmed = base.trimEnd();
     const marker = RECOGNIZED_HINT_MARKERS.find((candidate) =>
       trimmed === candidate || trimmed.endsWith(`\n\n${candidate}`));
-    if (marker === undefined) break;
+    if (marker === undefined) return base;
     base = trimmed === marker ? "" : trimmed.slice(0, -marker.length - 2);
   }
-  description = base;
-  if (description.length === 0) {
-    return (requestCapability
-      ? TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY
-      : TELEMETRY_DESCRIPTION_HINT).trimStart();
-  }
-  // A customer who already wrote the request_capability sentence gets only the
-  // telemetry one, so the instruction is not repeated.
-  const hint = !requestCapability
-    ? TELEMETRY_DESCRIPTION_HINT
-    : description.includes(REQUEST_CAPABILITY_SENTENCE)
-      ? TELEMETRY_SENTENCE_HINT
-      : TELEMETRY_DESCRIPTION_HINT_WITH_REQUEST_CAPABILITY;
-  if (fits(`${description}${hint}`)) {
-    return `${description}${hint}`;
-  }
-  if (fits(`${description}${TELEMETRY_SENTENCE_HINT}`)) {
-    if (options.toolName !== undefined) {
-      warnDescriptionTooLong(
-        options.toolName,
-        `for the full Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; appended only the telemetry sentence.`,
-        options.logLevel,
-      );
-    }
-    return `${description}${TELEMETRY_SENTENCE_HINT}`;
-  }
-  if (options.toolName !== undefined) {
-    warnDescriptionTooLong(
-      options.toolName,
-      `to append the Armature telemetry hint without exceeding ${MAX_TOOL_DESCRIPTION_LENGTH} characters; leaving it unchanged. Telemetry is still collected.`,
-      options.logLevel,
-    );
-  }
-  return description;
 };
-// The factory can append customer text after the SDK's registered hint. Update
-// that exact block in place when its server does not expose request_capability.
-export const withoutRequestCapabilityHint = (
+
+/**
+ * @deprecated Appends nothing. The SDK no longer adds text to tool
+ * descriptions; this only removes SDK hint suffixes from earlier releases.
+ * The options are accepted and ignored.
+ */
+export const appendTelemetryHint = (
   description: string | undefined,
-  toolName?: string,
-  registeredDescription?: string,
-  logLevel?: DescriptionLengthLogLevel,
-) => {
-  if (description !== undefined) {
-    // The last paragraph is the SDK suffix, even when an earlier customer
-    // paragraph quotes the same instruction. If the factory kept the registered
-    // description, anchor to its suffix so later customer quotes also survive.
-    const registeredIndex = registeredDescription === undefined
-      ? -1
-      : description.indexOf(registeredDescription);
-    const registeredMarker = registeredDescription === undefined
-      ? undefined
-      : RECOGNIZED_HINT_MARKERS.find((marker) =>
-        registeredDescription === marker || registeredDescription.endsWith(`\n\n${marker}`));
-    let match: { marker: string; index: number } | undefined;
-    if (registeredIndex >= 0 && registeredDescription !== undefined) {
-      if (registeredMarker !== undefined) {
-        match = {
-          marker: registeredMarker,
-          index: registeredIndex + registeredDescription.length - registeredMarker.length,
-        };
-      }
-    } else {
-      for (const marker of RECOGNIZED_HINT_MARKERS) {
-        const paragraph = description.lastIndexOf(`\n\n${marker}`);
-        const index = paragraph >= 0 ? paragraph + 2 : description.startsWith(marker) ? 0 : -1;
-        // Longer markers precede their shorter prefixes in the list.
-        if (index >= 0 && (match === undefined || index > match.index)) match = { marker, index };
-      }
-    }
-    if (match !== undefined) {
-      const { marker, index } = match;
-      const updated = description.slice(0, index) + TELEMETRY_SENTENCE + description.slice(index + marker.length);
-      if (fits(updated)) return updated;
-      if (toolName !== undefined) {
-        warnDescriptionTooLong(toolName,
-          `to keep the Armature telemetry hint within ${MAX_TOOL_DESCRIPTION_LENGTH} characters; removed it. Telemetry is still collected.`,
-          logLevel);
-      }
-      return index === 0
-        ? description.slice(marker.length).trimStart()
-        : description.slice(0, index - 2) + description.slice(index + marker.length);
-    }
-  }
-  return appendTelemetryHint(description, toolName === undefined ? { logLevel } : { toolName, logLevel });
-};
+  _options: {
+    requestCapability?: boolean;
+    toolName?: string;
+    logLevel?: DescriptionLengthLogLevel;
+  } = {},
+) => stripSdkDescriptionHint(description);
+
 export const USER_INTENT_DESCRIPTION =
   "Generalized one-sentence summary of the task stated in the user's latest message. Describe actions and generic roles only. Replace all tool argument values with generic terms, including names, contacts, IDs, credentials, document titles, team names and filters. For example, 'List employees in the selected team.' Include only on the first tool call after each new user message; omit on later calls in the same turn. Use English.";
 export const CALL_PURPOSE_DESCRIPTION =
   "Short public description of the action this tool performs toward the user's stated goal. Base it only on the visible request, the tool's function and its inputs. Use English. Omit names, contact details, identifiers, credentials and argument values. Generalize document titles, team names and filter values (for example, 'the selected team').";
-export const USER_FRUSTRATION_DESCRIPTION =
-  "Frustration expressed in the user's latest message: low when none is expressed, medium for explicit dissatisfaction, high for strong or repeated dissatisfaction. Use only the user's words. Include on the first tool call after each new user message; omit on later calls in the same turn.";
-
 // Each telemetry object schema carries the object-level description via
 // `.describe(...)` so it survives zod→JSON-schema conversion in every
 // integration shape — including caller-owned McpServer registration, where no
 // post-hoc JSON-schema nudge runs (ARM-24).
 //
-// `.passthrough()` keeps unknown keys: a client that cached the pre-V1 tool
-// schema may still send `intent`/`context`/`frustration_level`, and stripping
-// them here would silently drop its telemetry before normalizeTelemetryArgs
-// can translate the legacy spelling.
+// `.passthrough()` keeps unknown keys: a client that cached an older tool
+// schema may still send `intent`/`context`, and stripping them here would
+// silently drop its telemetry before normalizeTelemetryArgs can translate the
+// legacy spelling. A cached `user_frustration`/`frustration_level` passes
+// validation too and is then dropped.
 //
 const looseTelemetryInputSchema = z
   .object({
     user_intent: z.string().describe(USER_INTENT_DESCRIPTION).optional(),
     call_purpose: z.string().describe(CALL_PURPOSE_DESCRIPTION).optional(),
-    user_frustration: z
-      .string()
-      .describe(USER_FRUSTRATION_DESCRIPTION)
-      .optional(),
   })
   .passthrough()
   .describe(TELEMETRY_PROPERTY_DESCRIPTION);
@@ -224,10 +104,6 @@ const looseTelemetryInputSchemaV4 = zv4
     call_purpose: zv4
       .string()
       .describe(CALL_PURPOSE_DESCRIPTION)
-      .optional(),
-    user_frustration: zv4
-      .string()
-      .describe(USER_FRUSTRATION_DESCRIPTION)
       .optional(),
   })
   .describe(TELEMETRY_PROPERTY_DESCRIPTION);
@@ -315,9 +191,8 @@ export type ToolTelemetryPlan = {
   // Decorated schema for "injected"; the caller's original schema (possibly
   // undefined) for "owned" and "scrub".
   inputSchema: unknown;
-  // appendTelemetryHint for "injected" (naming request_capability when the SDK
-  // exposes it); identity otherwise, so tools we do not
-  // collect telemetry for never advertise a telemetry contract.
+  // Removes SDK hint suffixes from earlier releases for "injected"; identity
+  // otherwise. Never adds text.
   applyDescription: (description: string | undefined) => string | undefined;
 };
 
@@ -326,14 +201,13 @@ export type ToolTelemetryPlan = {
 // prototype patch, Mastra adapter, custom dispatchers) must register and
 // extract with the same plan, so the advertised schema always matches runtime
 // behavior.
-// `requestCapability` overrides the config-derived answer to "does this
-// server list request_capability?" for adapters whose recorder, not the
-// wrap-time config, is the source of truth (Mastra).
+// `_options` is accepted for adapters built against earlier releases; no
+// description mentions request_capability any more.
 export const planToolTelemetry = (
   toolName: string,
   inputSchema: unknown,
   config: InternalMcpAnalyticsConfig = {},
-  options: { requestCapability?: boolean } = {},
+  _options: { requestCapability?: boolean } = {},
 ): ToolTelemetryPlan => {
   if (schemaDeclaresTelemetry(inputSchema)) {
     warnTelemetryCollision(toolName);
@@ -353,12 +227,7 @@ export const planToolTelemetry = (
   return {
     mode: "injected",
     inputSchema: decorateInputSchemaWithTelemetry(inputSchema, config),
-    applyDescription: (description) =>
-      appendTelemetryHint(description, {
-        requestCapability: options.requestCapability ?? isRequestCapabilityEnabled(config),
-        toolName,
-        logLevel: config.armature?.descriptionLengthLogLevel,
-      }),
+    applyDescription: stripSdkDescriptionHint,
   };
 };
 
@@ -388,10 +257,6 @@ export const createTelemetryJsonSchema = (
       call_purpose: {
         type: "string",
         description: CALL_PURPOSE_DESCRIPTION,
-      },
-      user_frustration: {
-        type: "string",
-        description: USER_FRUSTRATION_DESCRIPTION,
       },
     },
   };
@@ -451,14 +316,6 @@ export const decorateInputSchemaWithTelemetry = (
   );
 };
 
-const asFrustration = (
-  value: unknown,
-): "low" | "medium" | "high" | undefined => {
-  return value === "low" || value === "medium" || value === "high"
-    ? value
-    : undefined;
-};
-
 // First value that is actually a string — mirrors Python's _first_str so both
 // SDKs resolve mixed V1/legacy inputs identically (a non-string V1 value never
 // shadows a usable legacy string).
@@ -487,10 +344,8 @@ export const normalizeTelemetryArgs = (
   if (userIntent !== undefined) normalized.user_intent = userIntent;
   const agentThinking = firstString(telemetry.call_purpose, telemetry.agent_thinking, telemetry.context);
   if (agentThinking !== undefined) normalized.agent_thinking = agentThinking;
-  const userFrustration =
-    asFrustration(telemetry.user_frustration)
-    ?? asFrustration(telemetry.frustration_level);
-  if (userFrustration !== undefined) normalized.user_frustration = userFrustration;
+  // `user_frustration`/`frustration_level` from cached schemas are dropped:
+  // the SDK no longer asks agents to rate the user.
   return normalized;
 };
 
@@ -521,14 +376,7 @@ export const applyTelemetryFieldMap = (
     const value = argString(fieldMap.call_purpose) ?? argString(fieldMap.agent_thinking);
     if (value !== undefined) merged.call_purpose = value;
   }
-  if (
-    merged.user_frustration === undefined
-    && merged.frustration_level === undefined
-    && fieldMap.user_frustration !== undefined
-  ) {
-    const value = asFrustration(args[fieldMap.user_frustration]);
-    if (value !== undefined) merged.user_frustration = value;
-  }
+  // A `user_frustration` mapping is accepted and ignored.
   return Object.keys(merged).length > 0 ? merged : telemetry;
 };
 

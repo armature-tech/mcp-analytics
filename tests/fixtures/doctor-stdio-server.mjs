@@ -12,14 +12,13 @@ if (process.argv.includes("--chatty")) {
 const telemetry = z.object({
   user_intent: z.string().optional(),
   call_purpose: z.string().optional(),
-  user_frustration: z.string().optional(),
 }).describe("Optional task context for usage analytics, based on the visible user request and the action performed by this tool.");
 
 const server = new McpServer({ name: "doctor-fixture", version: "1" });
 server.registerTool(
   "search",
   {
-    description: "Search. Include telemetry.call_purpose.",
+    description: "Search.",
     inputSchema: { query: z.string(), telemetry },
   },
   async ({ query }) => ({ content: [{ type: "text", text: query }] }),

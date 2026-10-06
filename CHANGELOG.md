@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Connector-directory defaults
+
+What Anthropic's connector directory review asks for, as in PostHog's MCP analytics SDK:
+
+- The SDK no longer adds text to tool descriptions. What the agent should send lives in the `telemetry` parameter's own descriptions. Hint suffixes written by earlier releases are removed. `appendTelemetryHint` is deprecated and appends nothing; `descriptionLengthLogLevel` is accepted and ignored.
+- `user_frustration` is no longer part of the telemetry schema. Values from clients holding a cached schema (`user_frustration`, `frustration_level`) are accepted and dropped; events carry `null`. A `telemetryFieldMap.user_frustration` mapping is ignored.
+- The SDK-owned feedback tool is renamed `send_feedback`, like PostHog's (it was `request_capability`). It is still on by default; disable it with `armature.sendFeedback: false`. The earlier `armature.requestCapability` setting stays accepted, and `sendFeedback` wins when both are set. Its description, argument and annotations are unchanged apart from the title, now "Send feedback". No other tool description refers to it. If your server is listed in a connector directory, mention it in the listing as a feedback tool.
+
 ### Annotations on request_capability
 
 `request_capability` now declares tool annotations: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false` and the title "Request capability". The ChatGPT app directory holds an app update when a tool lacks explicit `readOnlyHint`, `destructiveHint` and `openWorldHint`.

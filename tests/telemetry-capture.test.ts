@@ -162,7 +162,7 @@ test("captureTelemetry=false leaves schema and description untouched (scrub mode
   assert.equal(plan.applyDescription(undefined), undefined);
 });
 
-test("captureTelemetry default decorates schema and appends the hint (injected mode)", () => {
+test("captureTelemetry default decorates the schema and leaves the description alone (injected mode)", () => {
   const plan = planToolTelemetry("search", {
     type: "object",
     properties: { q: { type: "string" } },
@@ -171,19 +171,46 @@ test("captureTelemetry default decorates schema and appends the hint (injected m
   assert.equal(plan.mode, "injected");
   const schema = plan.inputSchema as JsonObjectSchema;
   assert.ok(schema.properties?.telemetry, "telemetry property injected");
-  assert.match(
-    plan.applyDescription("Find things.") ?? "",
-    /telemetry\.user_intent/,
-  );
+  // The SDK never adds text to a tool description; what the agent is asked
+  // for lives in the injected parameter's own descriptions.
+  assert.equal(plan.applyDescription("Find things."), "Find things.");
+  assert.equal(plan.applyDescription(undefined), undefined);
 });
 
 test("advertised task context asks for a public action and accepts omitted fields", () => {
   const schema = createTelemetryJsonSchema();
-  assert.deepEqual(Object.keys(schema.properties ?? {}), ["user_intent", "call_purpose", "user_frustration"]);
+  assert.deepEqual(Object.keys(schema.properties ?? {}), ["user_intent", "call_purpose"]);
   assert.equal(schema.required, undefined);
   assert.doesNotMatch(JSON.stringify(schema), /agent_thinking|your reasoning|Always provide/i);
+  assert.doesNotMatch(JSON.stringify(schema), /frustration/i);
   const plan = planToolTelemetry("search", { type: "object", properties: {} });
-  assert.match(plan.applyDescription("Search records.") ?? "", /Include telemetry\.call_purpose/);
+  assert.equal(plan.applyDescription("Search records."), "Search records.");
+});
+
+test("a cached user_frustration passes extraction but is dropped from telemetry and the event", async () => {
+  assert.deepEqual(
+    normalizeTelemetryArgs({ user_intent: "Find a record.", user_frustration: "high" }),
+    { user_intent: "Find a record." },
+  );
+  assert.deepEqual(normalizeTelemetryArgs({ frustration_level: "medium" }), {});
+
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = createAnalyticsRecorder({ armature: {
+    delivery: "await",
+    emit: (batch) => { batches.push(batch); },
+  } });
+  const received: unknown[] = [];
+  const invoke = recorder.tool({ name: "lookup", inputSchema: { type: "object", properties: {} } }, (args) => {
+    received.push(args);
+    return { ok: true };
+  });
+  await invoke({ telemetry: { user_intent: "Find a record.", user_frustration: "high", frustration_level: "high" } });
+  const event = batches.flatMap((batch) => batch.events).find((item) => item.kind === "tool_call");
+  assert.ok(event);
+  assert.deepEqual(received, [{}]);
+  assert.equal(event.metadata.user_intent, "Find a record.");
+  assert.equal(event.metadata.user_frustration, null);
+  assert.equal(event.metadata.frustration_level, null);
 });
 
 test("call purpose wins over cached aliases, including an explicit blank", () => {
@@ -365,14 +392,18 @@ test("direct recordToolCall for a registered owned tool drops supplied telemetry
   assert.equal(event.metadata.user_intent, null);
 });
 
-test("applyTelemetryFieldMap never overrides explicit telemetry and validates types", () => {
+test("applyTelemetryFieldMap never overrides explicit telemetry, validates types and ignores a user_frustration mapping", () => {
   assert.deepEqual(
     applyTelemetryFieldMap(
       { user_intent: "explicit" },
       { purpose: "mapped", turn: 2, mood: "high" },
       { user_intent: "purpose", user_turn: "turn", user_frustration: "mood" },
     ),
-    { user_intent: "explicit", user_frustration: "high" },
+    { user_intent: "explicit" },
+  );
+  assert.deepEqual(
+    applyTelemetryFieldMap(undefined, { mood: "high" }, { user_frustration: "mood" }),
+    undefined,
   );
   assert.deepEqual(
     applyTelemetryFieldMap(
@@ -389,6 +420,12 @@ test("applyTelemetryFieldMap never overrides explicit telemetry and validates ty
       { user_intent: "purpose", agent_thinking: "thinking", user_frustration: "mood" },
     ),
     { intent: "legacy explicit", context: "legacy context", frustration_level: "medium" },
+  );
+  // The explicit legacy frustration value survives the merge but is dropped
+  // when the telemetry is normalized for export.
+  assert.deepEqual(
+    normalizeTelemetryArgs({ intent: "legacy explicit", context: "legacy context", frustration_level: "medium" }),
+    { user_intent: "legacy explicit", agent_thinking: "legacy context" },
   );
 });
 

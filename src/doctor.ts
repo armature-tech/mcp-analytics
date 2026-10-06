@@ -7,6 +7,7 @@ import { SDK_IDENTITY, SDK_USER_AGENT } from "./emit.js";
 import {
   REQUEST_CAPABILITY_DESCRIPTION,
   REQUEST_CAPABILITY_TOOL_NAME,
+  LEGACY_REQUEST_CAPABILITY_TOOL_NAME,
 } from "./request-capability.js";
 
 const DEFAULT_INGEST_URL = "https://app.armature.tech/api/mcp-analytics/ingest";
@@ -267,13 +268,15 @@ export const classifyToolInstrumentation = (
   return ownsTelemetryField ? "owned" : "missing";
 };
 
-// The SDK's own request_capability tool is registered without a telemetry
-// block on purpose (its input is already conversation-derived), so the
+// The SDK's own send_feedback tool (request_capability in earlier releases) is
+// registered without a telemetry block on purpose (its input is already
+// conversation-derived), so the
 // wrapping check must not count it as an unwrapped customer tool. Match on
 // the exact advertised description as well as the reserved name so a
 // customer-defined tool that merely shadows the name is still checked.
 export const isSdkOwnedCapabilityTool = (tool: DoctorTool): boolean =>
-  tool.name === REQUEST_CAPABILITY_TOOL_NAME
+  (tool.name === REQUEST_CAPABILITY_TOOL_NAME
+    || tool.name === LEGACY_REQUEST_CAPABILITY_TOOL_NAME)
   && (tool.description || "") === REQUEST_CAPABILITY_DESCRIPTION;
 
 export const inspectToolCoverage = (tools: DoctorTool[]) => {

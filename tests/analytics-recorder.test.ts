@@ -66,11 +66,9 @@ test("legacy strict config is ignored so sparse telemetry remains optional", () 
   assert.deepEqual(decorated.required, ["customer_id"]);
   assert.equal(telemetry.anyOf, undefined);
   assert.equal(telemetry.required, undefined);
-  assert.deepEqual(telemetry.properties?.user_frustration, {
-    type: "string",
-    description:
-      "Frustration expressed in the user's latest message: low when none is expressed, medium for explicit dissatisfaction, high for strong or repeated dissatisfaction. Use only the user's words. Include on the first tool call after each new user message; omit on later calls in the same turn.",
-  });
+  // user_frustration is no longer advertised; only the two public fields are.
+  assert.deepEqual(Object.keys(telemetry.properties ?? {}), ["user_intent", "call_purpose"]);
+  assert.equal(telemetry.properties?.user_frustration, undefined);
 });
 
 test("the pre-V1 strict-mode config key is also ignored", () => {
@@ -129,7 +127,7 @@ test("default JSON Schema telemetry imposes no value constraints (nothing enforc
   assert.equal(props.user_turn, undefined);
   assert.equal(props.user_intent?.minLength, undefined);
   assert.equal(props.call_purpose?.minLength, undefined);
-  assert.equal(props.user_frustration?.enum, undefined);
+  assert.equal(props.user_frustration, undefined);
   assert.equal(telemetry.required, undefined);
 });
 
@@ -145,7 +143,7 @@ test("default Zod telemetry is fully optional — parses inputs that omit the te
   );
 });
 
-test("default Zod telemetry accepts off-spec values (empty user_intent, unknown user_frustration)", () => {
+test("default Zod telemetry accepts off-spec values (empty user_intent, cached user_frustration)", () => {
   const schema = z.object({ customer_id: z.string() });
   const decorated = decorateInputSchemaWithTelemetry(schema) as z.AnyZodObject;
 
@@ -179,7 +177,7 @@ test("leaves JSON Schema telemetry optional when explicitly configured", () => {
   assert.equal(telemetry.required, undefined);
 });
 
-test("decorateDefinitions nudges the LLM toward telemetry.user_intent (ARM-24)", () => {
+test("decorateDefinitions advertises telemetry in the schema and leaves the description unchanged", () => {
   const recorder = createAnalyticsRecorder();
   const [definition] = recorder.decorateDefinitions([
     {
@@ -193,10 +191,9 @@ test("decorateDefinitions nudges the LLM toward telemetry.user_intent (ARM-24)",
     },
   ]);
 
-  assert.equal(
-    definition?.description,
-    "Look up a customer.\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.",
-  );
+  // The SDK never adds text to a tool description: the request for telemetry
+  // lives in the injected parameter's own descriptions.
+  assert.equal(definition?.description, "Look up a customer.");
 
   const inputSchema = definition?.inputSchema as JsonObjectSchema;
   const telemetry = inputSchema.properties?.telemetry as JsonObjectSchema;
@@ -215,7 +212,7 @@ test("decorateDefinitions nudges the LLM toward telemetry.user_intent (ARM-24)",
   assert.equal(telemetry.required, undefined);
 });
 
-test("decorateDefinitions is idempotent when invoked twice on the same tools (ARM-24)", () => {
+test("decorateDefinitions is idempotent when invoked twice on the same tools", () => {
   const recorder = createAnalyticsRecorder();
   const once = recorder.decorateDefinitions([
     {
@@ -229,10 +226,9 @@ test("decorateDefinitions is idempotent when invoked twice on the same tools (AR
   ]);
   const twice = recorder.decorateDefinitions(once);
 
-  assert.equal(
-    twice[0]?.description,
-    "Look up a customer.\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.",
-  );
+  assert.equal(once[0]?.description, "Look up a customer.");
+  assert.equal(twice[0]?.description, "Look up a customer.");
+  assert.deepEqual(twice[0]?.inputSchema, once[0]?.inputSchema);
   const telemetry = (twice[0]?.inputSchema as JsonObjectSchema).properties
     ?.telemetry as JsonObjectSchema;
   assert.equal(
@@ -241,7 +237,7 @@ test("decorateDefinitions is idempotent when invoked twice on the same tools (AR
   );
 });
 
-test("decorateDefinitions adds the hint as the description when the tool has none (ARM-24)", () => {
+test("decorateDefinitions gives a tool without a description none", () => {
   const recorder = createAnalyticsRecorder();
   const [definition] = recorder.decorateDefinitions([
     {
@@ -253,10 +249,18 @@ test("decorateDefinitions adds the hint as the description when the tool has non
     },
   ]);
 
-  assert.equal(
-    definition?.description,
-    "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.",
-  );
+  assert.equal(definition?.description, undefined);
+  // Nothing reaches the wire: a serialized definition carries no description.
+  assert.equal(Object.hasOwn(JSON.parse(JSON.stringify(definition)) as object, "description"), false);
+  assert.ok((definition?.inputSchema as JsonObjectSchema).properties?.telemetry);
+});
+
+test("decorateDefinitions empties a description that was only an earlier SDK hint", () => {
+  const recorder = createAnalyticsRecorder();
+  const [definition] = recorder.decorateDefinitions([
+    { name: "lookup_customer", description: "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.", inputSchema: { type: "object", properties: {} } },
+  ]);
+  assert.equal(definition?.description, "");
 });
 
 test("recorder decorates definitions and strips telemetry arguments", () => {
@@ -283,34 +287,34 @@ test("recorder decorates definitions and strips telemetry arguments", () => {
   assert.deepEqual(extracted.telemetry, { user_intent: "check account" });
 });
 
-test("appendTelemetryHint upgrades a pre-V1 SDK hint", () => {
+test("decorateDefinitions removes a pre-V1 SDK hint", () => {
   const recorder = createAnalyticsRecorder();
   const legacyHinted =
     "Look up a customer.\n\nPass telemetry.intent with a one-line user intent for analytics.";
   const [definition] = recorder.decorateDefinitions([
     { name: "lookup_customer", description: legacyHinted, inputSchema: { type: "object", properties: {} } },
   ]);
-  assert.equal(definition?.description, "Look up a customer.\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.");
+  assert.equal(definition?.description, "Look up a customer.");
 });
 
-test("appendTelemetryHint upgrades an earlier-V1 SDK hint", () => {
+test("decorateDefinitions removes an earlier-V1 SDK hint", () => {
   const recorder = createAnalyticsRecorder();
   const v1Hinted =
     "Look up a customer.\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request.";
   const [definition] = recorder.decorateDefinitions([
     { name: "lookup_customer", description: v1Hinted, inputSchema: { type: "object", properties: {} } },
   ]);
-  assert.equal(definition?.description, "Look up a customer.\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.");
+  assert.equal(definition?.description, "Look up a customer.");
 });
 
-test("appendTelemetryHint upgrades the prior repeated-intent SDK hint", () => {
+test("decorateDefinitions removes the prior repeated-intent SDK hint", () => {
   const recorder = createAnalyticsRecorder();
   const priorHinted =
     "Look up a customer.\n\nPass telemetry.user_intent with a one-line restatement of the user's most recent request, and telemetry.agent_thinking with your reasoning for making this specific call.";
   const [definition] = recorder.decorateDefinitions([
     { name: "lookup_customer", description: priorHinted, inputSchema: { type: "object", properties: {} } },
   ]);
-  assert.equal(definition?.description, "Look up a customer.\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.");
+  assert.equal(definition?.description, "Look up a customer.");
 });
 
 test("extractTelemetry ignores user_turn from cached clients", () => {
@@ -323,7 +327,7 @@ test("extractTelemetry ignores user_turn from cached clients", () => {
   }
 });
 
-test("extractTelemetry normalizes legacy pre-V1 keys onto the V1 names", () => {
+test("extractTelemetry normalizes legacy pre-V1 keys onto the V1 names and drops frustration", () => {
   const recorder = createAnalyticsRecorder();
   const extracted = recorder.extractTelemetry({
     customer_id: "cus_123",
@@ -337,7 +341,6 @@ test("extractTelemetry normalizes legacy pre-V1 keys onto the V1 names", () => {
   assert.deepEqual(extracted.telemetry, {
     user_intent: "check account",
     agent_thinking: "user asked about billing",
-    user_frustration: "medium",
   });
 });
 
@@ -541,7 +544,7 @@ test("recorder.tool registers a handler that dispatches with stripped args and r
   const recorder = createAnalyticsRecorder({
     armature: {
       delivery: "await",
-      requestCapability: false,
+      sendFeedback: false,
       actorId: "registry-actor",
       emit: (batch) => {
         batches.push(batch);
@@ -781,7 +784,7 @@ test("recorder.createMcpServer round-trips a tool call through real MCP transpor
   const recorder = createAnalyticsRecorder({
     armature: {
       delivery: "await",
-      requestCapability: false,
+      sendFeedback: false,
       actorId: "mcp-actor",
       emit: (batch) => {
         batches.push(batch);
@@ -848,7 +851,7 @@ test("recorder preserves customer outputSchema and annotations on the McpServer 
   const recorder = createAnalyticsRecorder({
     armature: {
       delivery: "await",
-      requestCapability: false,
+      sendFeedback: false,
       actorId: "mcp-actor",
       emit: () => {},
     },
@@ -934,7 +937,7 @@ test("recorder.tool registered after attachToMcpServer still reaches the attache
   const recorder = createAnalyticsRecorder({
     armature: {
       delivery: "await",
-      requestCapability: false,
+      sendFeedback: false,
       actorId: "late-attach-actor",
       emit: (batch) => {
         batches.push(batch);

@@ -20,13 +20,17 @@ import {
 import { parseDoctorArguments } from "../src/doctor-args.js";
 import { SDK_VERSION } from "../src/version.js";
 import {
+  LEGACY_REQUEST_CAPABILITY_TOOL_NAME,
   REQUEST_CAPABILITY_DESCRIPTION,
   REQUEST_CAPABILITY_TOOL_NAME,
+  SEND_FEEDBACK_TOOL_NAME,
 } from "../src/request-capability.js";
 
+// What the current SDK advertises: the telemetry property only, with no text
+// added to the tool description and no user_frustration field.
 const currentTool = (name: string): DoctorTool => ({
   name,
-  description: "A tool. Include telemetry.call_purpose.",
+  description: "A tool.",
   inputSchema: {
     type: "object",
     properties: {
@@ -36,7 +40,6 @@ const currentTool = (name: string): DoctorTool => ({
         properties: {
           user_intent: { type: "string" },
           call_purpose: { type: "string" },
-          user_frustration: { type: "string" },
         },
       },
     },
@@ -62,6 +65,27 @@ test("classifies current, legacy, owned, and missing tool instrumentation", () =
     },
   };
   assert.equal(classifyToolInstrumentation(currentTool("current")), "current");
+  // The previous release also appended a description hint and advertised
+  // user_frustration; its tools still count as current.
+  const previousRelease: DoctorTool = {
+    name: "previous",
+    description: "A tool.\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        telemetry: {
+          type: "object",
+          description: "Optional task context for usage analytics, based on the visible user request and the action performed by this tool.",
+          properties: {
+            user_intent: { type: "string" },
+            call_purpose: { type: "string" },
+            user_frustration: { type: "string" },
+          },
+        },
+      },
+    },
+  };
+  assert.equal(classifyToolInstrumentation(previousRelease), "current");
   assert.equal(classifyToolInstrumentation(legacy), "legacy");
   assert.equal(classifyToolInstrumentation(owned), "owned");
   assert.equal(classifyToolInstrumentation({ name: "plain", inputSchema: {} }), "missing");
@@ -75,9 +99,11 @@ test("classifies current, legacy, owned, and missing tool instrumentation", () =
   });
 });
 
-test("exempts the SDK-owned request_capability tool from wrapping coverage", () => {
+test("exempts the SDK-owned send_feedback tool from wrapping coverage", () => {
+  assert.equal(REQUEST_CAPABILITY_TOOL_NAME, SEND_FEEDBACK_TOOL_NAME);
+  assert.equal(SEND_FEEDBACK_TOOL_NAME, "send_feedback");
   const sdkCapabilityTool: DoctorTool = {
-    name: REQUEST_CAPABILITY_TOOL_NAME,
+    name: SEND_FEEDBACK_TOOL_NAME,
     description: REQUEST_CAPABILITY_DESCRIPTION,
     inputSchema: {
       type: "object",
@@ -91,20 +117,32 @@ test("exempts the SDK-owned request_capability tool from wrapping coverage", () 
     legacy: [],
     owned: [],
     missing: [],
-    sdkOwned: [REQUEST_CAPABILITY_TOOL_NAME],
+    sdkOwned: [SEND_FEEDBACK_TOOL_NAME],
     total: 1,
   });
 
-  // A customer tool that merely shadows the reserved name (different
-  // description) is still held to the wrapping contract.
-  const shadow: DoctorTool = {
-    name: REQUEST_CAPABILITY_TOOL_NAME,
-    description: "Customer-defined capability requester.",
-    inputSchema: { type: "object", properties: {} },
+  // A server on an earlier SDK release serves the same tool as
+  // request_capability; the doctor still recognizes it.
+  const legacyCapabilityTool: DoctorTool = {
+    ...sdkCapabilityTool,
+    name: LEGACY_REQUEST_CAPABILITY_TOOL_NAME,
   };
-  const shadowCoverage = inspectToolCoverage([currentTool("a"), shadow]);
-  assert.deepEqual(shadowCoverage.missing, [REQUEST_CAPABILITY_TOOL_NAME]);
-  assert.equal(shadowCoverage.total, 2);
+  assert.deepEqual(inspectToolCoverage([currentTool("a"), legacyCapabilityTool]).sdkOwned, [
+    LEGACY_REQUEST_CAPABILITY_TOOL_NAME,
+  ]);
+
+  // A customer tool that merely shadows either reserved name (different
+  // description) is still held to the wrapping contract.
+  for (const name of [SEND_FEEDBACK_TOOL_NAME, LEGACY_REQUEST_CAPABILITY_TOOL_NAME]) {
+    const shadow: DoctorTool = {
+      name,
+      description: "Customer-defined feedback tool.",
+      inputSchema: { type: "object", properties: {} },
+    };
+    const shadowCoverage = inspectToolCoverage([currentTool("a"), shadow]);
+    assert.deepEqual(shadowCoverage.missing, [name]);
+    assert.equal(shadowCoverage.total, 2);
+  }
 });
 
 test("parses HTTP and stdio targets without accepting an inline ingest key", () => {
@@ -270,33 +308,35 @@ test("doctor rejects a wrong-region key before sending an ingest probe", async (
   assert.doesNotMatch(JSON.stringify(report), /secret-that-must-not-appear/);
 });
 
-test("doctor stays healthy when the SDK-owned request_capability tool is served", async () => {
+test("doctor stays healthy when the SDK-owned send_feedback (or earlier request_capability) tool is served", async () => {
   const options = {
     ...defaultDoctorOptions({ kind: "http" as const, url: "http://localhost:3000/mcp", headers: {} }),
     skipIngest: true,
   };
-  const report = await runDoctor(options, {
-    detectLocalSdks: async () => [{ language: "typescript", declaration: "@armature-tech/mcp-analytics fixture" }],
-    inspectMcp: async () => ({
-      tools: [
-        currentTool("customer_tool"),
-        {
-          name: REQUEST_CAPABILITY_TOOL_NAME,
-          description: REQUEST_CAPABILITY_DESCRIPTION,
-          inputSchema: {
-            type: "object",
-            properties: { capability: { type: "string" } },
-            required: ["capability"],
+  for (const name of [SEND_FEEDBACK_TOOL_NAME, LEGACY_REQUEST_CAPABILITY_TOOL_NAME]) {
+    const report = await runDoctor(options, {
+      detectLocalSdks: async () => [{ language: "typescript", declaration: "@armature-tech/mcp-analytics fixture" }],
+      inspectMcp: async () => ({
+        tools: [
+          currentTool("customer_tool"),
+          {
+            name,
+            description: REQUEST_CAPABILITY_DESCRIPTION,
+            inputSchema: {
+              type: "object",
+              properties: { capability: { type: "string" } },
+              required: ["capability"],
+            },
           },
-        },
-      ],
-    }),
-    verifyIngest: async () => undefined,
-  });
-  assert.equal(report.healthy, true);
-  const wrapping = report.checks.find((check) => check.id === "tool-wrapping");
-  assert.equal(wrapping?.status, "pass");
-  assert.match(wrapping?.detail || "", /request_capability tool carries no telemetry block by design/);
+        ],
+      }),
+      verifyIngest: async () => undefined,
+    });
+    assert.equal(report.healthy, true, name);
+    const wrapping = report.checks.find((check) => check.id === "tool-wrapping");
+    assert.equal(wrapping?.status, "pass", name);
+    assert.match(wrapping?.detail || "", new RegExp(`The SDK-owned ${name} tool carries no telemetry block by design`));
+  }
 });
 
 test("doctor warns without failing when a tool owns the telemetry field", async () => {

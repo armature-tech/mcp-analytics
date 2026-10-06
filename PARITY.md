@@ -36,17 +36,18 @@ implementation and acceptance contract is recorded in the
 | In-body ingest rejection surfaced as delivery error | Yes | Yes | Yes | Yes |
 | Custom emitter and delivery error callback | Yes | Yes | Yes | Yes |
 | Flush and shutdown drain pending work | Yes | Yes | Yes | Yes |
-| SDK-owned `request_capability` tool | Yes | Yes | Yes | Yes |
-| `request_capability` declares readOnly/destructive/idempotent/openWorld hints | Yes | Yes | Yes | Yes |
-| Description hint names `request_capability` when exposed | Yes | Yes | Yes | Yes |
-| Configurable log level for the description-length notice | Yes | Yes | Yes | Yes |
+| SDK-owned `send_feedback` tool (`request_capability` before 2026-10) | Yes | Yes | Yes | Yes |
+| `send_feedback` declares readOnly/destructive/idempotent/openWorld hints | Yes | Yes | Yes | Yes |
+| `send_feedback` on by default, `sendFeedback: false` disables it | Yes | Yes | Yes | Yes |
+| No text added to tool descriptions; earlier SDK hint suffixes removed | Yes | Yes | Yes | Yes |
 | Exact artifact and Armature readback canary | Yes | Yes | Yes | Yes |
 | Deployed Claude Code and Codex isolation canary | Yes | Yes | Yes | Yes |
 | Batch `sdk` identity from real package metadata | Yes | Yes | Yes | Yes |
 
-The public telemetry schema contains `user_intent`, `call_purpose`, and
-`user_frustration` in all four SDKs. `call_purpose` describes an observable
-action. Cached `agent_thinking` and `context` inputs remain accepted.
+The public telemetry schema contains `user_intent` and `call_purpose` in all
+four SDKs. `call_purpose` describes an observable action. Cached
+`agent_thinking` and `context` inputs remain accepted; cached
+`user_frustration` and `frustration_level` are accepted and dropped.
 The event storage keys stay unchanged for compatibility.
 
 ## Intentional differences

@@ -17,7 +17,6 @@ import {
 import {
   CALL_PURPOSE_DESCRIPTION,
   TELEMETRY_PROPERTY_DESCRIPTION,
-  USER_FRUSTRATION_DESCRIPTION,
   USER_INTENT_DESCRIPTION,
 } from "../src/schema.js";
 
@@ -185,6 +184,11 @@ test("declareTelemetry end to end: advertised schemas carry the v1 telemetry pro
     // ── tools/list: the ADVERTISED schema shows telemetry, byte-identical to v1
     const { tools } = (await client.listTools()) as { tools: ListedTool[] };
     const byName = new Map(tools.map((t) => [t.name, t]));
+    const registeredDescriptions: Record<string, string> = {
+      zecho: "Echo a message.",
+      strict_echo: "Strict echo.",
+      ping: "Liveness check.",
+    };
 
     for (const name of ["zecho", "strict_echo", "ping"]) {
       const telemetry = telemetryPropertyOf(byName.get(name));
@@ -203,14 +207,15 @@ test("declareTelemetry end to end: advertised schemas carry the v1 telemetry pro
         telemetry.properties?.call_purpose?.description,
         CALL_PURPOSE_DESCRIPTION,
       );
-      assert.equal(
-        telemetry.properties?.user_frustration?.description,
-        USER_FRUSTRATION_DESCRIPTION,
+      assert.deepEqual(
+        Object.keys(telemetry.properties ?? {}),
+        ["user_intent", "call_purpose"],
+        `${name}: user_frustration is no longer advertised`,
       );
-      assert.match(
-        String(byName.get(name)?.description),
-        /Include telemetry\.call_purpose/i,
-        `${name}: the v1 description nudge must be appended`,
+      assert.equal(
+        byName.get(name)?.description,
+        registeredDescriptions[name],
+        `${name}: the SDK never adds text to the description`,
       );
     }
 
@@ -224,7 +229,7 @@ test("declareTelemetry end to end: advertised schemas carry the v1 telemetry pro
     assert.deepEqual(strict?.inputSchema?.required, ["msg"]);
     assert.equal(strict?.inputSchema?.properties?.msg?.type, "string");
 
-    // An owned schema is never re-decorated and gets no nudge.
+    // An owned schema is never re-decorated and keeps its description.
     const owned = byName.get("owned_tool");
     assert.equal(telemetryPropertyOf(owned)?.description, undefined);
     assert.equal(owned?.description, "Customer owns telemetry.");
@@ -238,6 +243,8 @@ test("declareTelemetry end to end: advertised schemas carry the v1 telemetry pro
         telemetry: {
           user_intent: "declared round trip",
           call_purpose: "probing decoration",
+          // Sent by a client holding a cached schema: accepted, then dropped.
+          user_frustration: "high",
         },
       },
     });
@@ -259,6 +266,8 @@ test("declareTelemetry end to end: advertised schemas carry the v1 telemetry pro
       "adapter-declared telemetry resolves armature-owned: exported",
     );
     assert.equal(toolCall?.metadata.agent_thinking, "probing decoration");
+    assert.equal(toolCall?.metadata.user_frustration, null);
+    assert.equal(toolCall?.metadata.frustration_level, null);
     assert.ok(
       !String(toolCall?.metadata.input_preview).includes("declared round trip"),
       "stripped telemetry must not leak into the input preview",

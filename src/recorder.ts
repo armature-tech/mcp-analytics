@@ -180,10 +180,8 @@ export const createAnalyticsRecorder = (
     // positional juggling below keys on what we actually registered, which for
     // owned/scrub tools is the caller's original (possibly absent) schema.
     const registeredHasInputSchema = plan.inputSchema !== undefined;
-    // Same nudge `decorateDefinitions` applies in the registry path — the
-    // caller-owned McpServer path must also tell agents to pass
-    // telemetry.user_intent, or sessions arrive with no intent (ARM-24).
-    // Owned/scrub tools keep their original description untouched.
+    // Same description handling as `decorateDefinitions`: no added text, only
+    // earlier SDK hint suffixes removed. Owned/scrub tools keep theirs as is.
     const description = plan.applyDescription(registration.description);
 
     server.registerTool(
@@ -238,7 +236,7 @@ export const createAnalyticsRecorder = (
       // merely by default, a customer tool of the same name takes precedence:
       // fall through so this registration overwrites the SDK-owned entry.
       throw new Error(
-        `Tool name "${REQUEST_CAPABILITY_TOOL_NAME}" is reserved while armature.requestCapability is enabled.`,
+        `Tool name "${REQUEST_CAPABILITY_TOOL_NAME}" is reserved while armature.sendFeedback is enabled.`,
       );
     }
     registeredTools.set(registration.name, {

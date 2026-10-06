@@ -11,7 +11,7 @@ import {
 } from "./recorder-core.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
 import {
-  appendTelemetryHint,
+  stripSdkDescriptionHint,
   createTelemetryJsonSchema,
   decorateInputSchemaWithTelemetry,
   isCaptureEnabled,
@@ -548,11 +548,8 @@ const wrapFastmcpTool = <T extends FastmcpToolLike>(
   return {
     ...tool,
     parameters: decoratedParameters,
-    // Same idempotent description nudge as the v1/v2 integrations (ARM-24).
-    description: appendTelemetryHint(tool.description, {
-      toolName: tool.name,
-      logLevel: state.config.armature?.descriptionLengthLogLevel,
-    }),
+    // Never adds text; removes SDK hint suffixes from earlier releases.
+    description: stripSdkDescriptionHint(tool.description),
     execute: wrappedExecute,
   } as T;
 };

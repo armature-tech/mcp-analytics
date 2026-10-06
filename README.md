@@ -97,7 +97,7 @@ No custom event schema. No logging pipeline. No changes to your tool handlers.
 Armature instruments the boundary around every tool call:
 
 1. The SDK adds an optional **telemetry** block to the tool’s input schema.
-2. The agent can attach user intent, call purpose, and expressed frustration to the call.
+2. The agent can attach user intent and call purpose to the call.
 3. The SDK removes telemetry before your handler receives the arguments.
 4. Timing, outcome, and truncated previews are sent to your dashboard.
 
@@ -105,20 +105,21 @@ Armature instruments the boundary around every tool call:
 {
   "telemetry": {
     "user_intent": "Check whether the customer's last payment succeeded",
-    "call_purpose": "The payment lookup tool provides the requested status",
-    "user_frustration": "low"
+    "call_purpose": "The payment lookup tool provides the requested status"
   }
 }
 ~~~
 
 All telemetry fields are optional. Include **call_purpose** with a short public
-description of the action. Send **user_intent** and **user_frustration** only
-on the first call after each new user message. Their absence on later calls
-means the same turn continues.
+description of the action. Send **user_intent** only on the first call after
+each new user message. Its absence on later calls means the same turn
+continues. These instructions live in the fields' own descriptions: the SDK
+never adds text to your tool descriptions, as Anthropic's connector directory
+requires.
 
-The earlier **agent_thinking**, **intent**, **context**, and
-**frustration_level** names remain accepted. Cached **user_turn** values are
-ignored. **call_purpose** takes precedence over **agent_thinking** and
+The earlier **agent_thinking**, **intent** and **context** names remain
+accepted. Cached **user_turn**, **user_frustration** and **frustration_level**
+values are accepted and dropped. **call_purpose** takes precedence over **agent_thinking** and
 **context**, including an explicit empty string. It describes the visible
 action and its relation to the stated goal.
 
@@ -403,8 +404,8 @@ type McpAnalyticsConfig = {
     redact?: (value: unknown) => unknown;
     redactEvent?: (event) => typeof event | null | Promise<typeof event | null>;
     schedule?: (work: Promise<void>) => void;
-    telemetryFieldMap?: { user_intent?: string; call_purpose?: string; user_frustration?: string };
-    requestCapability?: boolean;
+    telemetryFieldMap?: { user_intent?: string; call_purpose?: string };
+    sendFeedback?: boolean;
   };
 };
 ~~~
@@ -426,17 +427,22 @@ type McpAnalyticsConfig = {
 | **redactEvent** | None | Mutate or drop the prepared whole tool-call event |
 | **schedule** | None | Register background work with a serverless lifecycle primitive |
 | **telemetryFieldMap** | None | Export existing argument fields as telemetry (see below) |
-| **requestCapability** | **true** | Inject `request_capability` so agents can report an unmet tool need; set `false` to disable |
+| **sendFeedback** | **true** | List the `send_feedback` feedback tool so agents can report an unmet tool need; set `false` to disable |
 
 Network failures, timeouts, `429`, and `5xx` responses are retried once after
 100 ms (two attempts total). Other `4xx` responses are not retried.
 `IngestDeliveryError` exposes a payload-free `code`, `status`, `retryable`, and
 `attempts` through `onError`; telemetry delivery remains fail-open by default.
 
-### Capability requests
+### Feedback tool
 
-The SDK-owned `request_capability` tool is added to the advertised tool list by
-default. The tool accepts one required `capability` string and uses this
+The SDK adds a `send_feedback` tool to the advertised tool list, as PostHog's
+SDK does. Agents call it when your tools cannot do what the user asked. It is
+on by default; set **sendFeedback: false** to disable it. If your server is
+listed in a connector directory, mention the tool in the listing as a feedback
+tool. Releases before 2026-10 named it `request_capability`; the earlier
+**requestCapability** setting is still accepted, and **sendFeedback** wins when
+both are set. The tool accepts one required `capability` string and uses this
 description exactly:
 
 > Records that the user asked for something these tools cannot do, so the developers of this server can add it. It changes no data and contacts no one. Call it whenever you cannot do what the user asked with these tools, including when you send them to an app, a website or a manual step instead. Then answer them as usual.
@@ -444,27 +450,18 @@ description exactly:
 It declares the annotations app directories such as ChatGPT's require:
 `readOnlyHint: false` (it records an analytics event), `destructiveHint: false`
 (it changes no user data) and `openWorldHint: false` (it contacts no one), plus
-`idempotentHint: false` and the title "Request capability".
+`idempotentHint: false` and the title "Send feedback".
 
 Calls are recorded through the normal analytics pipeline and feed Armature's
-unmet-demand signals. Set **requestCapability: false** to disable it. It is also
-suppressed when **enabled: false** or no API key/custom **emit** delivery is
-configured. When you explicitly set **requestCapability: true**, the name is
-reserved: rename a customer-defined tool with the same name first. When it is on
-merely by default, a customer tool of the same name takes precedence and the SDK
-skips its own injection instead of failing.
+unmet-demand signals. The tool is also suppressed when **enabled: false** or no
+API key/custom **emit** delivery is configured. When you explicitly set
+**sendFeedback: true**, the name is reserved: rename a customer-defined tool
+with the same name first. When it is on by default, a customer tool named
+`send_feedback` takes precedence and the SDK skips its own.
 
-While the tool is exposed, the telemetry hint appended to every instrumented
-tool description also tells agents to call `request_capability` when no tool
-can do what the user asks. The SDK never pushes a description past 1024
-characters (UTF-8 bytes): if the full hint does not fit, it appends only the
-telemetry sentence, and if that does not fit either, it leaves the description
-unchanged and logs a warning. Either notice is logged once per tool with
-`console.warn`; set **descriptionLengthLogLevel** to `"info"`, `"debug"` or
-`"none"` to log it at a lower level or not at all. Every level writes to
-stderr where the runtime has one (Node, Bun, Deno), so stdio servers keep
-stdout for JSON-RPC; `"info"` and `"debug"` use `console.info` and
-`console.debug` only in runtimes without stderr, such as Workers.
+No other tool description mentions `send_feedback`, and the SDK adds no
+text to tool descriptions. Hint suffixes written by earlier SDK releases are
+removed. **descriptionLengthLogLevel** is accepted and ignored.
 
 ```mermaid
 sequenceDiagram
@@ -475,19 +472,19 @@ sequenceDiagram
     participant Ingest as Armature ingest
     participant Demand as Demand pipeline
 
-    App->>SDK: Construct server with requestCapability enabled
+    App->>SDK: Construct server with sendFeedback enabled
     SDK->>SDK: Check analytics enabled and delivery configured
     alt Injection is disabled or cannot deliver
-        SDK-->>App: Return server without request_capability
+        SDK-->>App: Return server without send_feedback
     else Injection is active
         SDK->>MCP: Check reserved tool name
         alt Name collision
             SDK-->>App: Raise explicit configuration error
         else Name is available
-            SDK->>MCP: Register request_capability schema and handler
+            SDK->>MCP: Register send_feedback schema and handler
             Agent->>MCP: List tools
-            MCP-->>Agent: Advertise request_capability
-            Agent->>MCP: Call request_capability(capability)
+            MCP-->>Agent: Advertise send_feedback
+            Agent->>MCP: Call send_feedback(capability)
             MCP->>SDK: Record provenance-marked tool_call
             MCP-->>Agent: Capability request acknowledged
             SDK->>Ingest: Deliver analytics event
@@ -498,7 +495,7 @@ sequenceDiagram
 
 ### Telemetry capture and privacy
 
-The SDK injects an optional `telemetry` object (`user_intent`, `call_purpose`, `user_frustration`) into each wrapped tool's input schema. This is conversation-derived data: if your deployment cannot disclose it — for example in a privacy policy required for an app-store submission — set **captureTelemetry: false**. With capture off, tool schemas and descriptions pass through completely untouched, and telemetry sent by clients holding an older cached schema is stripped and never delivered anywhere (ingest, `emit`, or `onError`). Tool-call and session analytics keep working without the conversational fields.
+The SDK injects an optional `telemetry` object (`user_intent`, `call_purpose`) into each wrapped tool's input schema. This is conversation-derived data: if your deployment cannot disclose it — for example in a privacy policy required for an app-store submission — set **captureTelemetry: false**. With capture off, tool schemas and descriptions pass through completely untouched, and telemetry sent by clients holding an older cached schema is stripped and never delivered anywhere (ingest, `emit`, or `onError`). Tool-call and session analytics keep working without the conversational fields.
 
 Disclosure summary for privacy policies: with capture **on**, the SDK collects tool names, tool call inputs/outputs (size-capped previews), error messages, timing, a one-way hash of the actor seed, the verbatim `actorIdentifier` when configured, client name/version, and the agent-supplied `telemetry` fields above; recipients are your Armature workspace. With capture **off**, the `telemetry` fields are not collected.
 

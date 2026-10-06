@@ -440,7 +440,7 @@ const listedSchemaOf = async (
   return schema as ListedInputSchema;
 };
 
-test("fastmcp declareTelemetry: zod tools advertise telemetry (byte-identical wording), strip it from execute args, and export it", async () => {
+test("fastmcp declareTelemetry: zod tools advertise telemetry (byte-identical wording), keep their description, strip it from execute args, and export it", async () => {
   const { events, emit } = collectBatches();
   const options = testOptions(emit, { declareTelemetry: true });
   const server = new FastMCP({ name: "fastmcp-fixture", version: "1.0.0" });
@@ -477,22 +477,28 @@ test("fastmcp declareTelemetry: zod tools advertise telemetry (byte-identical wo
       telemetry.properties?.call_purpose?.description,
       CALL_PURPOSE_DESCRIPTION,
     );
+    assert.deepEqual(
+      Object.keys(telemetry.properties ?? {}),
+      ["user_intent", "call_purpose"],
+      "user_frustration is no longer advertised",
+    );
     // telemetry stays optional; fastmcp's strictJsonSchema still advertises a
     // closed top level, where the now-declared telemetry passes.
     assert.deepEqual(schema.required, ["msg"]);
     assert.equal(schema.additionalProperties, false);
     const listed = await client.listTools();
-    assert.match(
-      String(listed.tools.find((t) => t.name === "echo")?.description),
-      /telemetry\.call_purpose/,
-      "description carries the telemetry nudge",
+    assert.equal(
+      listed.tools.find((t) => t.name === "echo")?.description,
+      "Echo a message.",
+      "the SDK never adds text to the description",
     );
 
     await client.callTool({
       name: "echo",
       arguments: {
         msg: "m",
-        telemetry: { user_intent: "declared round trip", call_purpose: "action purpose" },
+        // A cached user_frustration passes validation and is dropped.
+        telemetry: { user_intent: "declared round trip", call_purpose: "action purpose", user_frustration: "high" },
       },
     });
     assert.deepEqual(received, { msg: "m" }, "telemetry stripped before execute");
@@ -501,6 +507,8 @@ test("fastmcp declareTelemetry: zod tools advertise telemetry (byte-identical wo
     );
     assert.equal(withTelemetry?.metadata.user_intent, "declared round trip");
     assert.equal(withTelemetry?.metadata.agent_thinking, "action purpose");
+    assert.equal(withTelemetry?.metadata.user_frustration, null);
+    assert.equal(withTelemetry?.metadata.frustration_level, null);
 
     // Absent telemetry keeps working exactly as before.
     const bare = await client.callTool({ name: "echo", arguments: { msg: "plain" } });
@@ -687,7 +695,7 @@ test("fastmcp declareTelemetry: owned schemas and capture-off tools are never de
       TELEMETRY_PROPERTY_DESCRIPTION,
       "customer schema left untouched",
     );
-    assert.equal(owned?.description, "Owns its telemetry.", "no nudge on owned tools");
+    assert.equal(owned?.description, "Owns its telemetry.", "owned tools keep their description");
     const scrub = listed.tools.find((t) => t.name === "scrub_tool");
     assert.equal(
       "telemetry" in ((scrub?.inputSchema as ListedInputSchema).properties ?? {}),

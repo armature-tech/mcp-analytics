@@ -14,7 +14,7 @@ description: >
 
 You are integrating the `@armature-tech/mcp-analytics` SDK into a customer's MCP server
 codebase. The SDK decorates each tool's input schema with a `telemetry.*` block (so the
-agent can pass `user_intent`, `call_purpose`, `user_frustration`), strips those fields before the
+agent can pass `user_intent`, `call_purpose`), strips those fields before the
 handler runs, and posts an authenticated batch to Armature after each call.
 
 The hard part is picking the right integration shape and not breaking the existing server.
@@ -120,7 +120,7 @@ const server = createMcpAnalyticsServer(
     armature: {
       // endpointUrl / apiKey default to env vars
       delivery: "await", // or "background" — see Step 4
-      // request_capability is on by default; add `requestCapability: false` to disable (see Step 7).
+      // send_feedback is on by default; add `sendFeedback: false` to disable (see Step 7).
     },
   },
 );
@@ -450,10 +450,11 @@ Tell the user, briefly:
 - `delivery: "background"` drops batches in serverless. You picked `"await"` (or not — say which).
 - The SDK no-ops silently if `ANALYTICS_INGEST_API_KEY` is missing. Set it in prod.
 - Confirm where both regional environment variables are configured; the URL is required for EU.
-- The SDK adds a `request_capability` tool (on by default) so the agent can report a capability the
+- The SDK adds a `send_feedback` tool (on by default) so the agent can report a capability the
   current tools can't satisfy — this is what surfaces "unmet demand" use cases in Armature.
-  It's recommended, so leave it on. Briefly tell the user it's enabled and offer to turn it off:
-  set `requestCapability: false` in the `armature` config if they'd rather not expose it.
+  Tell the user it's enabled and how to turn it off: `sendFeedback: false` in the `armature`
+  config. If their server is listed in a connector directory (Anthropic, ChatGPT), they should
+  mention it in the listing as a feedback tool.
 
 Don't pad with anything else. End with one line: what you changed and what the
 user needs to do (paste the generated key and regional URL, deploy).

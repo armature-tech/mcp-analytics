@@ -252,12 +252,13 @@ const assembleToolCallEvent = (
       tool_name: candidate.toolName,
       user_intent: t?.user_intent ?? null,
       agent_thinking: t?.agent_thinking ?? null,
-      user_frustration: t?.user_frustration ?? null,
+      // No longer collected; kept null so older ingests read the same shape.
+      user_frustration: null,
       // Legacy mirrors (pre-V1 key names) so an ingest that hasn't picked up
       // the V1 schema keeps reading events from this SDK.
       intent: t?.user_intent ?? null,
       context: t?.agent_thinking ?? null,
-      frustration_level: t?.user_frustration ?? null,
+      frustration_level: null,
       input_preview: inputPreview.value,
       ...(input.capabilityRequest ? { capability_request: true } : {}),
     },

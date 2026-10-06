@@ -91,6 +91,7 @@ export type TelemetryFieldMap = {
   call_purpose?: string;
   /** @deprecated Accepted for compatibility. Prefer call_purpose. */
   agent_thinking?: string;
+  /** @deprecated `user_frustration` is no longer collected; this mapping is ignored. */
   user_frustration?: string;
 };
 
@@ -107,10 +108,9 @@ export type McpAnalyticsConfig = {
     onError?: (error: unknown, batch: AnalyticsIngestBatch) => void;
     timeoutMs?: number;
     // Master switch for conversation-derived telemetry (user_intent,
-    // call_purpose, user_frustration). Default true. When false
-    // the SDK injects no `telemetry` schema field, appends no description
-    // nudges, and never exports telemetry values — including values sent by
-    // clients holding a cached schema, which are stripped and dropped.
+    // call_purpose). Default true. When false the SDK injects no `telemetry`
+    // schema field and never exports telemetry values — including values sent
+    // by clients holding a cached schema, which are stripped and dropped.
     captureTelemetry?: boolean;
     /** Built-in high-confidence secret detection. Enabled by default. */
     redactSecrets?: boolean;
@@ -120,13 +120,17 @@ export type McpAnalyticsConfig = {
     /** Register background work with a platform lifecycle primitive (for example waitUntil). */
     schedule?: (work: Promise<void>) => void;
     telemetryFieldMap?: TelemetryFieldMap;
-    // SDK-owned request_capability tool that lets agents report a capability
-    // absent from the server's current tool set. On by default (when a
-    // delivery path is configured); set to false to disable.
+    // SDK-owned send_feedback tool, a feedback tool agents call to report a
+    // capability the server lacks. On by default (when a delivery path is
+    // configured); set to false to disable. A server listed in a connector
+    // directory that keeps it should mention it in its listing. No other tool
+    // description refers to it.
+    sendFeedback?: boolean;
+    /** @deprecated Earlier name of `sendFeedback`; `sendFeedback` wins when both are set. */
     requestCapability?: boolean;
     /**
-     * Level of the one-time notice for a tool description too long for the
-     * full telemetry hint: "none", "debug", "info" or "warning" (default).
+     * @deprecated The SDK no longer adds text to tool descriptions, so there
+     * is no length notice. Accepted and ignored.
      */
     descriptionLengthLogLevel?: DescriptionLengthLogLevel;
   };
@@ -164,12 +168,13 @@ export type TelemetryArgs = {
   call_purpose?: string;
   /** @deprecated Accepted for compatibility. Prefer call_purpose. */
   agent_thinking?: string;
+  /** @deprecated No longer collected: accepted from cached clients and dropped. */
   user_frustration?: "low" | "medium" | "high";
   /** @deprecated Pre-V1 spelling of `user_intent`; still accepted. */
   intent?: string;
   /** @deprecated Pre-V1 spelling of `agent_thinking`; still accepted. */
   context?: string;
-  /** @deprecated Pre-V1 spelling of `user_frustration`; still accepted. */
+  /** @deprecated No longer collected: accepted from cached clients and dropped. */
   frustration_level?: "low" | "medium" | "high";
 };
 
@@ -222,7 +227,7 @@ export type RecordToolCallEvent = {
   error?: unknown;
   clientInfo?: McpClientInfo;
   workflowRunId?: string;
-  // Internal provenance marker for the SDK-owned request_capability tool.
+  // Internal provenance marker for the SDK-owned send_feedback tool.
   capabilityRequest?: boolean;
   // Extra metadata keys merged into the tool_call event's metadata object.
   // Contract-defined keys always win on a collision (see events.ts). Used by

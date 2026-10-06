@@ -11,12 +11,8 @@ import type {
   WithMcpAnalyticsResult,
 } from "./types.js";
 import { createAnalyticsRecorder } from "./recorder.js";
-import {
-  appendTelemetryHint,
-  planToolTelemetry,
-  withoutRequestCapabilityHint,
-} from "./schema.js";
-import type { DescriptionLengthLogLevel, TelemetryMode } from "./types.js";
+import { planToolTelemetry } from "./schema.js";
+import type { TelemetryMode } from "./types.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
 import { deriveToolResultError, isRecord } from "./utils.js";
 import {
@@ -28,44 +24,10 @@ import {
 type WithAnalyticsContext = {
   config: McpAnalyticsConfig;
   recorder: AnalyticsRecorder;
-  // Set once the factory returns and the SDK-owned tool is attached (or not).
-  // Callbacks the factory scheduled keep this context, so later registrations
-  // check their own server directly.
-  resolved: boolean;
-  // Tools registered while the factory ran whose hint names
-  // request_capability, with the description they get if their server ends
-  // up not listing it.
-  requestCapabilityHints: Array<{
-    server: McpServer;
-    tool: unknown;
-    toolName: string;
-    // What we registered; a different value later means the factory updated it.
-    hintedDescription: string | undefined;
-    fallbackDescription: string | undefined;
-    logLevel: DescriptionLengthLogLevel | undefined;
-  }>;
 };
 
 const withAnalyticsStorage = new AsyncLocalStorage<WithAnalyticsContext>();
 let prototypePatchInstalled = false;
-
-// Servers a tool named request_capability was registered on: the SDK-owned
-// one the recorder attaches, or a customer's own. Only the fallback for an
-// SDK build without the tool registry below.
-const serversListingRequestCapability = new WeakSet<McpServer>();
-
-// Whether tools/list on `server` currently carries request_capability. Reads
-// the SDK's registry (the same map and `enabled` filter tools/list uses), so
-// a tool removed or disabled after registration no longer counts.
-const listsRequestCapability = (server: McpServer) => {
-  const registry = (server as unknown as {
-    _registeredTools?: Record<string, { enabled?: boolean } | undefined>;
-  })._registeredTools;
-  if (registry !== null && typeof registry === "object") {
-    return registry[REQUEST_CAPABILITY_TOOL_NAME]?.enabled === true;
-  }
-  return serversListingRequestCapability.has(server);
-};
 
 // Mirrors the SDK's `isZodTypeLike`/`isZodRawShapeCompat` checks closely enough
 // to disambiguate the overloads of `server.tool(...)`: a raw shape is a plain
@@ -204,21 +166,12 @@ const installPrototypePatchOnce = () => {
   ) {
     const ctx = withAnalyticsStorage.getStore();
     if (!ctx) {
-      const registered = originalRegisterTool.call(this, name, toolConfig, cb);
-      if (name === REQUEST_CAPABILITY_TOOL_NAME) serversListingRequestCapability.add(this);
-      return registered;
+      return originalRegisterTool.call(this, name, toolConfig, cb);
     }
 
     const { config } = ctx;
     const originalHasInputSchema = toolConfig.inputSchema !== undefined;
-    const plan = planToolTelemetry(
-      name,
-      toolConfig.inputSchema,
-      config,
-      ctx.resolved
-        ? { requestCapability: listsRequestCapability(this) }
-        : {},
-    );
+    const plan = planToolTelemetry(name, toolConfig.inputSchema, config);
     const registeredHasInputSchema = plan.inputSchema !== undefined;
     const description = plan.applyDescription(toolConfig.description);
     const instrumentedConfig = {
@@ -235,27 +188,12 @@ const installPrototypePatchOnce = () => {
       ctx,
     );
 
-    const registered = originalRegisterTool.call(
+    return originalRegisterTool.call(
       this,
       name,
       instrumentedConfig,
       wrappedCallback,
     );
-    if (name === REQUEST_CAPABILITY_TOOL_NAME) serversListingRequestCapability.add(this);
-    if (!ctx.resolved && plan.mode === "injected" && isRequestCapabilityEnabled(config)) {
-      ctx.requestCapabilityHints.push({
-        server: this,
-        tool: registered,
-        toolName: name,
-        hintedDescription: description,
-        fallbackDescription: appendTelemetryHint(toolConfig.description, {
-          toolName: name,
-          logLevel: config.armature?.descriptionLengthLogLevel,
-        }),
-        logLevel: config.armature?.descriptionLengthLogLevel,
-      });
-    }
-    return registered;
   };
 
   // PRIA and other older codebases still use the deprecated `server.tool(...)`
@@ -294,8 +232,6 @@ export const withMcpAnalytics = <ServerFactoryResult>(
   const ctx: WithAnalyticsContext = {
     config,
     recorder,
-    resolved: false,
-    requestCapabilityHints: [],
   };
   const result = withAnalyticsStorage.run(ctx, createServer);
   // Customer tools registered inside the factory are handled by the
@@ -305,11 +241,11 @@ export const withMcpAnalytics = <ServerFactoryResult>(
   // description.
   if (isRequestCapabilityEnabled(config) && !(result instanceof McpServer)) {
     // Only a hard error when the caller explicitly opted in. A server that is
-    // request_capability-on merely by default and doesn't return an McpServer
-    // silently skips injection instead of breaking on upgrade.
+    // on merely by default and doesn't return an McpServer silently skips
+    // injection instead of breaking on upgrade.
     if (isRequestCapabilityExplicit(config)) {
       throw new Error(
-        "armature.requestCapability requires the server factory to return an McpServer instance.",
+        "armature.sendFeedback requires the server factory to return an McpServer instance.",
       );
     }
   }
@@ -319,35 +255,16 @@ export const withMcpAnalytics = <ServerFactoryResult>(
     } catch (error) {
       const collision = error instanceof Error && /already registered/i.test(error.message);
       // A pre-existing tool of the same name is reserved only when the caller
-      // explicitly opted in; on-by-default yields to the customer's tool.
+      // explicitly opted in; on by default yields to the customer's tool.
       if (collision && isRequestCapabilityExplicit(config)) {
         throw new Error(
-          'Tool name "request_capability" is reserved while armature.requestCapability is enabled.',
+          `Tool name "${REQUEST_CAPABILITY_TOOL_NAME}" is reserved while armature.sendFeedback is enabled.`,
           { cause: error },
         );
       }
       if (!collision) throw error;
     }
   }
-  // Tools registered on a server that does not list request_capability (the
-  // factory returned something else, or registered on another server) must
-  // not point agents at it.
-  ctx.resolved = true;
-  for (const hint of ctx.requestCapabilityHints) {
-    if (
-      !listsRequestCapability(hint.server)
-      && hint.tool !== null
-      && typeof hint.tool === "object"
-    ) {
-      const tool = hint.tool as { description?: string };
-      // Keep a description the factory updated after registration; only its
-      // hint changes.
-      tool.description = tool.description === hint.hintedDescription
-        ? hint.fallbackDescription
-        : withoutRequestCapabilityHint(tool.description, hint.toolName, hint.hintedDescription, hint.logLevel);
-    }
-  }
-  ctx.requestCapabilityHints.length = 0;
   return { result, recorder };
 };
 

@@ -7,7 +7,7 @@
   },
   "extraction": [
     {
-      "name": "injected_strips_and_exports_current_fields_ignores_cached_user_turn",
+      "name": "injected_strips_and_exports_current_fields_ignores_cached_user_turn_and_frustration",
       "mode": "injected",
       "args": {
         "q": "x",
@@ -23,12 +23,11 @@
       },
       "expect_telemetry": {
         "user_intent": "find x",
-        "agent_thinking": "searching",
-        "user_frustration": "low"
+        "agent_thinking": "searching"
       }
     },
     {
-      "name": "injected_normalizes_legacy_aliases",
+      "name": "injected_normalizes_legacy_aliases_ignores_cached_frustration_level",
       "mode": "injected",
       "args": {
         "q": "x",
@@ -43,8 +42,7 @@
       },
       "expect_telemetry": {
         "user_intent": "legacy intent",
-        "agent_thinking": "legacy thinking",
-        "user_frustration": "high"
+        "agent_thinking": "legacy thinking"
       }
     },
     {

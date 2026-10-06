@@ -47,7 +47,7 @@ test("wrapMastraTools decorates Zod inputSchema with the telemetry block", () =>
   });
 });
 
-test("wrapMastraTools preserves id and unrelated tool properties, nudges the description", () => {
+test("wrapMastraTools preserves id, unrelated tool properties and the description", () => {
   const annotations = { readOnly: true };
   const tools: Record<string, MastraTool> = {
     echo: {
@@ -57,18 +57,32 @@ test("wrapMastraTools preserves id and unrelated tool properties, nudges the des
       annotations,
       execute: async (input) => input,
     },
+    // A description cached from an earlier release still carries the old SDK
+    // suffix; it comes out clean.
+    cached: {
+      id: "cached",
+      description: "Echo back.\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.",
+      inputSchema: z.object({ msg: z.string() }),
+      execute: async (input) => input,
+    },
+    bare: {
+      id: "bare",
+      inputSchema: z.object({ msg: z.string() }),
+      execute: async (input) => input,
+    },
   };
 
   const wrapped = wrapMastraTools(tools);
   assert.equal(wrapped.echo?.id, "echo");
-  // The description keeps its original text and gains the telemetry.user_intent
-  // nudge (ARM-24), like every other integration shape.
-  assert.equal(
-    wrapped.echo?.description,
-    "Echo back.\n\nInclude telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.",
-  );
+  // The SDK never adds text to a tool description, like every other
+  // integration shape; telemetry is advertised in the schema only.
+  assert.equal(wrapped.echo?.description, "Echo back.");
+  assert.equal(wrapped.cached?.description, "Echo back.");
+  assert.equal(wrapped.bare?.description, undefined);
   assert.equal(wrapped.echo?.annotations, annotations);
   assert.notEqual(wrapped.echo?.execute, tools.echo?.execute);
+  // No delivery path is configured, so the map gains no send_feedback tool.
+  assert.deepEqual(Object.keys(wrapped).sort(), ["bare", "cached", "echo"]);
 });
 
 test("wrapped execute strips telemetry from input before calling the original handler", async () => {
@@ -775,7 +789,7 @@ test("principalId on authInfo is used as the actor seed (alias) when no other fi
   assert.equal(toolCall?.actor_id, expectedActorId);
 });
 
-test("nudged JSON Schema also flows through wrapMastraTools for tools using JSON Schema inputSchema", async () => {
+test("decorated JSON Schema also flows through wrapMastraTools for tools using JSON Schema inputSchema", async () => {
   const batches: AnalyticsIngestBatch[] = [];
   const recorder = makeRecorder(batches);
 

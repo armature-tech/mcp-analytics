@@ -18,7 +18,7 @@ import {
 } from "./recorder-core.js";
 import { defaultMcpAnalyticsConfig } from "./emit.js";
 import {
-  appendTelemetryHint,
+  stripSdkDescriptionHint,
   createTelemetryJsonSchema,
   isCaptureEnabled,
   schemaDeclaresTelemetry,
@@ -597,11 +597,8 @@ const instrumentRegisteredTool = (
     ...(decoratedSchema !== undefined
       ? {
           paramsSchema: decoratedSchema,
-          // Same idempotent description nudge as v1 (ARM-24).
-          description: appendTelemetryHint(registered.description, {
-            toolName: name,
-            logLevel: state.config.armature?.descriptionLengthLogLevel,
-          }),
+          // Never adds text; removes SDK hint suffixes from earlier releases.
+          description: stripSdkDescriptionHint(registered.description),
         }
       : {}),
     callback: wrapToolCallback(

@@ -45,7 +45,8 @@ export default async function handler(req, res) {
       timeoutMs: 10_000,
       actorId: "sdk-canary-browser-worker",
       // The HTTP smoke test asserts an exact tool list; keep the on-by-default
-      // request_capability tool out of this fixture.
+      // send_feedback tool out of this fixture. The earlier key also works on
+      // releases that predate sendFeedback.
       requestCapability: false,
     },
   }, () => {

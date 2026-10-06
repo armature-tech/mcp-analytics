@@ -15,9 +15,6 @@ import {
   USER_INTENT_DESCRIPTION,
 } from "../src/schema.js";
 
-const TELEMETRY_DESCRIPTION_HINT =
-  "Include telemetry.call_purpose with a short description of this action. Include telemetry.user_intent and telemetry.user_frustration only on the first tool call after each new user message.";
-
 const collectBatches = () => {
   const batches: AnalyticsIngestBatch[] = [];
   return {
@@ -50,7 +47,7 @@ test("instrumentMcpServerTools registers tools on a caller-owned McpServer end-t
     server: baseServer,
     tools,
     config: {
-      armature: { delivery: "await", requestCapability: false, actorId: "instrument-actor", emit },
+      armature: { delivery: "await", sendFeedback: false, actorId: "instrument-actor", emit },
     },
   });
 
@@ -69,13 +66,13 @@ test("instrumentMcpServerTools registers tools on a caller-owned McpServer end-t
       "telemetry block should be advertised on the listed tool",
     );
 
-    // Regression (ARM-24): the LLM nudges must reach the wire in the
-    // caller-owned McpServer path too, not just `toolDefinitions()` — without
-    // them calling agents mostly omit telemetry.user_intent.
+    // The SDK never adds text to a tool description (directory reviews reject
+    // it); the request for telemetry reaches the wire through the injected
+    // schema's own descriptions, checked below (ARM-24).
     assert.equal(
       listed.tools[0]?.description,
-      `Look up a customer.\n\n${TELEMETRY_DESCRIPTION_HINT}`,
-      "tool description should carry the telemetry.user_intent hint",
+      "Look up a customer.",
+      "tool description should reach the wire exactly as registered",
     );
     const telemetrySchema = schema.properties?.telemetry as JsonObjectSchema;
     assert.equal(
@@ -149,7 +146,7 @@ test("instrumentMcpServerTools applies a mapTool to translate a custom registry 
     server: baseServer,
     tools: appRegistry,
     config: {
-      armature: { delivery: "await", requestCapability: false, actorId: "mapper-actor", emit },
+      armature: { delivery: "await", sendFeedback: false, actorId: "mapper-actor", emit },
     },
     mapTool: (def, key) => ({
       name: def.name ?? key ?? "anonymous",
@@ -211,7 +208,7 @@ test("instrumentMcpServerTools accepts an array of tools without a mapper", asyn
           okText(`b:${(args as { y: string }).y}`),
       },
     ] as InstrumentedTool[],
-    config: { armature: { delivery: "await", requestCapability: false, actorId: "array-actor", emit } },
+    config: { armature: { delivery: "await", sendFeedback: false, actorId: "array-actor", emit } },
   });
 
   const client = new Client({ name: "array-client", version: "0.0.1" });
@@ -219,11 +216,12 @@ test("instrumentMcpServerTools accepts an array of tools without a mapper", asyn
   await Promise.all([server.connect(st), client.connect(ct)]);
 
   try {
-    // Tools registered without a description still get the telemetry hint as
-    // their full description.
+    // Tools registered without a description stay without one; the telemetry
+    // field is still advertised.
     const listed = await client.listTools();
     for (const tool of listed.tools) {
-      assert.equal(tool.description, TELEMETRY_DESCRIPTION_HINT);
+      assert.equal(tool.description, undefined);
+      assert.ok((tool.inputSchema as JsonObjectSchema).properties?.telemetry);
     }
 
     await client.callTool({ name: "a", arguments: { x: "1" } });
