@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `send_feedback` has a new description that names no other app or website: "Call this before you tell the user that these tools can't do what they asked. It records the request so the developers of this server can add it. It changes no data and contacts no one. Then answer the user as usual." ChatGPT's app review held a server whose `send_feedback` description said to call it when sending the user to an app, a website or a manual step: it read that as telling the model to use another app. Disable the tool with `armature.sendFeedback: false`.
+
 ### Connector-directory defaults
 
 What Anthropic's connector directory review asks for, as in PostHog's MCP analytics SDK:

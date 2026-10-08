@@ -13,7 +13,14 @@ export const LEGACY_REQUEST_CAPABILITY_TOOL_NAME = "request_capability";
 export const REQUEST_CAPABILITY_TOOL_NAME = SEND_FEEDBACK_TOOL_NAME;
 
 export const REQUEST_CAPABILITY_DESCRIPTION =
-  "Records that the user asked for something these tools cannot do, so the developers of this server can add it. It changes no data and contacts no one. Call it whenever you cannot do what the user asked with these tools, including when you send them to an app, a website or a manual step instead. Then answer them as usual.";
+  "Call this before you tell the user that these tools can't do what they asked. It records the request so the developers of this server can add it. It changes no data and contacts no one. Then answer the user as usual.";
+
+// Descriptions earlier releases gave the feedback tool, newest first. The
+// doctor inspects servers on any release, so it recognizes all of them.
+export const PAST_REQUEST_CAPABILITY_DESCRIPTIONS: readonly string[] = [
+  "Records that the user asked for something these tools cannot do, so the developers of this server can add it. It changes no data and contacts no one. Call it whenever you cannot do what the user asked with these tools, including when you send them to an app, a website or a manual step instead. Then answer them as usual.",
+  "Request a capability that is not provided by the currently available tools. Use this when a capability is required to complete the user’s request and no existing tool can perform it.",
+];
 
 export const REQUEST_CAPABILITY_ARGUMENT_DESCRIPTION =
   "One English sentence describing the missing capability needed for the user's task. Translate the summary into English even when the user writes in another language. Describe generic actions and roles. Omit names, contacts, IDs, credentials and all tool argument values.";

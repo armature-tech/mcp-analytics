@@ -5,6 +5,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SDK_IDENTITY, SDK_USER_AGENT } from "./emit.js";
 import {
+  PAST_REQUEST_CAPABILITY_DESCRIPTIONS,
   REQUEST_CAPABILITY_DESCRIPTION,
   REQUEST_CAPABILITY_TOOL_NAME,
   LEGACY_REQUEST_CAPABILITY_TOOL_NAME,
@@ -272,12 +273,15 @@ export const classifyToolInstrumentation = (
 // registered without a telemetry block on purpose (its input is already
 // conversation-derived), so the
 // wrapping check must not count it as an unwrapped customer tool. Match on
-// the exact advertised description as well as the reserved name so a
-// customer-defined tool that merely shadows the name is still checked.
+// the exact advertised description (any release's) as well as the reserved
+// name so a customer-defined tool that merely shadows the name is still
+// checked.
+const SDK_CAPABILITY_DESCRIPTIONS = new Set([REQUEST_CAPABILITY_DESCRIPTION, ...PAST_REQUEST_CAPABILITY_DESCRIPTIONS]);
+
 export const isSdkOwnedCapabilityTool = (tool: DoctorTool): boolean =>
   (tool.name === REQUEST_CAPABILITY_TOOL_NAME
     || tool.name === LEGACY_REQUEST_CAPABILITY_TOOL_NAME)
-  && (tool.description || "") === REQUEST_CAPABILITY_DESCRIPTION;
+  && SDK_CAPABILITY_DESCRIPTIONS.has(tool.description || "");
 
 export const inspectToolCoverage = (tools: DoctorTool[]) => {
   const current: string[] = [];

@@ -20,6 +20,7 @@ import {
 import { parseDoctorArguments } from "../src/doctor-args.js";
 import { SDK_VERSION } from "../src/version.js";
 import {
+  PAST_REQUEST_CAPABILITY_DESCRIPTIONS,
   LEGACY_REQUEST_CAPABILITY_TOOL_NAME,
   REQUEST_CAPABILITY_DESCRIPTION,
   REQUEST_CAPABILITY_TOOL_NAME,
@@ -130,6 +131,13 @@ test("exempts the SDK-owned send_feedback tool from wrapping coverage", () => {
   assert.deepEqual(inspectToolCoverage([currentTool("a"), legacyCapabilityTool]).sdkOwned, [
     LEGACY_REQUEST_CAPABILITY_TOOL_NAME,
   ]);
+
+  // Servers on earlier releases serve the tool with an earlier description.
+  for (const description of PAST_REQUEST_CAPABILITY_DESCRIPTIONS) {
+    for (const name of [SEND_FEEDBACK_TOOL_NAME, LEGACY_REQUEST_CAPABILITY_TOOL_NAME]) {
+      assert.deepEqual(inspectToolCoverage([currentTool("a"), { ...sdkCapabilityTool, name, description }]).sdkOwned, [name]);
+    }
+  }
 
   // A customer tool that merely shadows either reserved name (different
   // description) is still held to the wrapping contract.
