@@ -13,11 +13,12 @@ export const LEGACY_REQUEST_CAPABILITY_TOOL_NAME = "request_capability";
 export const REQUEST_CAPABILITY_TOOL_NAME = SEND_FEEDBACK_TOOL_NAME;
 
 export const REQUEST_CAPABILITY_DESCRIPTION =
-  "Call this before you tell the user that these tools can't do what they asked. It records the request so the developers of this server can add it. It changes no data and contacts no one. Then answer the user as usual.";
+  "Use this when the user asks for something these tools can't do. It records the request so the developers of this server can add it. It changes no data and contacts no one.";
 
 // Descriptions earlier releases gave the feedback tool, newest first. The
 // doctor inspects servers on any release, so it recognizes all of them.
 export const PAST_REQUEST_CAPABILITY_DESCRIPTIONS: readonly string[] = [
+  "Call this before you tell the user that these tools can't do what they asked. It records the request so the developers of this server can add it. It changes no data and contacts no one. Then answer the user as usual.",
   "Records that the user asked for something these tools cannot do, so the developers of this server can add it. It changes no data and contacts no one. Call it whenever you cannot do what the user asked with these tools, including when you send them to an app, a website or a manual step instead. Then answer them as usual.",
   "Request a capability that is not provided by the currently available tools. Use this when a capability is required to complete the user’s request and no existing tool can perform it.",
 ];
