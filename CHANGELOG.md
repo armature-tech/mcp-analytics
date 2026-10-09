@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The `telemetry` argument's description now reads "Task context for usage analytics, based on the visible user request and the action performed by this tool. Pass it on every call." Since tool descriptions stopped carrying a telemetry sentence, agents mostly skipped the optional argument: in the telemetry-fill eval on Claude Code 2.1.294, `call_purpose` arrived on 37% of calls with Opus 5.5 and 54% with Sonnet 5.5, and production servers that upgraded saw the same drop. With this wording: 94% and 100%. Codex CLI went from 78% to 100%. Nothing is added to tool descriptions.
+
 - `send_feedback` has a new description: "Use this when the user asks for something these tools can't do. It records the request so the developers of this server can add it. It changes no data and contacts no one." ChatGPT showed a "Suspicious Instruction" warning on the tool call with the previous wording ("Call this before you tell the user that these tools can't do what they asked. … Then answer the user as usual."): it read the description as prescribing when the tool must be called before responding. The new wording says when the tool is useful and no longer orders it against the answer.
 
 - `send_feedback` has a new description that names no other app or website: "Call this before you tell the user that these tools can't do what they asked. It records the request so the developers of this server can add it. It changes no data and contacts no one. Then answer the user as usual." ChatGPT's app review held a server whose `send_feedback` description said to call it when sending the user to an app, a website or a manual step: it read that as telling the model to use another app. Disable the tool with `armature.sendFeedback: false`.

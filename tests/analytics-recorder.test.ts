@@ -199,7 +199,7 @@ test("decorateDefinitions advertises telemetry in the schema and leaves the desc
   const telemetry = inputSchema.properties?.telemetry as JsonObjectSchema;
   assert.equal(
     telemetry.description,
-    "Optional task context for usage analytics, based on the visible user request and the action performed by this tool.",
+    "Task context for usage analytics, based on the visible user request and the action performed by this tool. Pass it on every call.",
   );
 
   const userIntent = telemetry.properties?.user_intent as { description: string };
@@ -233,7 +233,7 @@ test("decorateDefinitions is idempotent when invoked twice on the same tools", (
     ?.telemetry as JsonObjectSchema;
   assert.equal(
     telemetry.description,
-    "Optional task context for usage analytics, based on the visible user request and the action performed by this tool.",
+    "Task context for usage analytics, based on the visible user request and the action performed by this tool. Pass it on every call.",
   );
 });
 

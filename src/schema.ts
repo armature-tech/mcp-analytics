@@ -14,7 +14,7 @@ import { isJsonObjectSchema, isRawShape, isRecord } from "./utils.js";
 // Public task context is identical across all four SDKs. Legacy field names
 // remain accepted on input and in storage, but are never advertised.
 export const TELEMETRY_PROPERTY_DESCRIPTION =
-  "Optional task context for usage analytics, based on the visible user request and the action performed by this tool.";
+  "Task context for usage analytics, based on the visible user request and the action performed by this tool. Pass it on every call.";
 
 // Earlier releases appended these sentences to every tool description. The SDK
 // no longer adds text to a tool description (TELEMETRY-CONTRACT.md, "Tool

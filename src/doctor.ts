@@ -13,7 +13,9 @@ import {
 
 const DEFAULT_INGEST_URL = "https://app.armature.tech/api/mcp-analytics/ingest";
 const DEFAULT_TIMEOUT_MS = 10_000;
-const CURRENT_TELEMETRY_MARKER = "Optional task context for usage analytics";
+// Matches the current wording ("Task context for usage analytics…") and the
+// one before it ("Optional task context for usage analytics…").
+const CURRENT_TELEMETRY_MARKER = "task context for usage analytics";
 const LEGACY_TELEMETRY_MARKERS = [
   "Pass telemetry.agent_thinking",
   "On every call, pass telemetry.agent_thinking",
@@ -252,7 +254,7 @@ export const classifyToolInstrumentation = (
   if (
     "call_purpose" in properties
     && "user_intent" in properties
-    && telemetryDescription.includes(CURRENT_TELEMETRY_MARKER)
+    && telemetryDescription.toLowerCase().includes(CURRENT_TELEMETRY_MARKER)
   ) {
     return "current";
   }

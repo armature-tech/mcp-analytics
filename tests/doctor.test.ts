@@ -37,7 +37,7 @@ const currentTool = (name: string): DoctorTool => ({
     properties: {
       telemetry: {
         type: "object",
-        description: "Optional task context for usage analytics, based on the visible user request and the action performed by this tool.",
+        description: "Task context for usage analytics, based on the visible user request and the action performed by this tool. Pass it on every call.",
         properties: {
           user_intent: { type: "string" },
           call_purpose: { type: "string" },
@@ -76,7 +76,7 @@ test("classifies current, legacy, owned, and missing tool instrumentation", () =
       properties: {
         telemetry: {
           type: "object",
-          description: "Optional task context for usage analytics, based on the visible user request and the action performed by this tool.",
+          description: "Task context for usage analytics, based on the visible user request and the action performed by this tool. Pass it on every call.",
           properties: {
             user_intent: { type: "string" },
             call_purpose: { type: "string" },
