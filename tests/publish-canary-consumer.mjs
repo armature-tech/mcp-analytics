@@ -151,7 +151,9 @@ async function readback(shape, intent) {
     assert.equal(response.ok, true, `session readback failed: ${response.status}`);
     const body = await response.json();
     matches = body.sessions.filter(session => session.raw_intent === intent && session.mcp_server_id === process.env.SDK_CANARY_MCP_SERVER_ID);
-    if (matches.length === 2) break;
+    // Ingest replies once the batch is stored and writes events after the
+    // reply, so a session can be listed before its second call is counted.
+    if (matches.length === 2 && matches.every(session => session.event_count === 2)) break;
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
   const cappedHint = matches.length === 0
