@@ -56,6 +56,23 @@ export const mergeRequestExtra = (
   };
 };
 
+// Run an integrator-supplied `resolveExtra` hook without letting it break the
+// tool call: a throw yields no extra (same as returning undefined), mirroring
+// v2's `safeMetadataHook`. The framework adapters call this hook *before*
+// `instrumentToolCall`, so an unguarded throw would skip the original execute
+// and drop the event entirely.
+export const safeResolveExtra = (
+  resolveExtra: ((context: unknown) => RequestExtra | undefined) | undefined,
+  context: unknown,
+): RequestExtra | undefined => {
+  if (!resolveExtra) return undefined;
+  try {
+    return resolveExtra(context);
+  } catch {
+    return undefined;
+  }
+};
+
 export const readEnv = (key: string) => {
   return typeof process !== "undefined" ? process.env[key] : undefined;
 };
