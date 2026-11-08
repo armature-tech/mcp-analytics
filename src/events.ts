@@ -485,13 +485,36 @@ export const normalizeStartedAt = ({
   durationMs?: number;
   finishedAtMs: number;
 }) => {
-  if (startedAt instanceof Date) return startedAt.toISOString();
-  if (typeof startedAt === "string") return new Date(startedAt).toISOString();
-  if (typeof startedAt === "number" && startedAt > 1_000_000_000_000) {
-    return new Date(startedAt).toISOString();
+  // Every branch below ultimately builds a Date and calls toISOString(), which
+  // throws RangeError on an invalid instant (an invalid Date, an unparseable
+  // string, a non-finite duration). This runs synchronously inside the public
+  // recordToolCall / recordSessionInit path, before the event is enqueued, so a
+  // caller passing a bad startedAt would crash their own tool call. Try each
+  // time source in priority order and keep the first that yields a valid
+  // instant, never throwing.
+  const toIso = (ms: number): string | undefined => {
+    const date = new Date(ms);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  };
+
+  let explicitMs: number | undefined;
+  if (startedAt instanceof Date) explicitMs = startedAt.getTime();
+  else if (typeof startedAt === "string") explicitMs = new Date(startedAt).getTime();
+  else if (typeof startedAt === "number" && startedAt > 1_000_000_000_000) {
+    explicitMs = startedAt;
   }
-  if (durationMs !== undefined) {
-    return new Date(finishedAtMs - durationMs).toISOString();
+
+  const duration =
+    typeof durationMs === "number" && Number.isFinite(durationMs) ? durationMs : undefined;
+  const candidates = [
+    explicitMs,
+    duration !== undefined ? finishedAtMs - duration : undefined,
+    finishedAtMs,
+  ];
+  for (const ms of candidates) {
+    if (ms === undefined) continue;
+    const iso = toIso(ms);
+    if (iso) return iso;
   }
-  return new Date(finishedAtMs).toISOString();
+  return new Date().toISOString();
 };
