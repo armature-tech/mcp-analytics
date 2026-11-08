@@ -134,8 +134,21 @@ export const truncateUtf8 = (value: string, maxBytes: number) => {
     return { value, truncated: false };
   }
 
+  // Slicing the raw buffer at `maxBytes` can land mid-character: `toString`
+  // then replaces the dangling bytes with U+FFFD (3 bytes), which both
+  // corrupts the text and can push the result *past* maxBytes. Walk the cut
+  // point back off any UTF-8 continuation byte (0b10xxxxxx) so we always land
+  // on a code-point boundary and stay within the limit.
+  const buffer = Buffer.from(value, "utf8");
+  let end = maxBytes;
+  while (end > 0) {
+    const byte = buffer[end];
+    if (byte === undefined || (byte & 0xc0) !== 0x80) break;
+    end--;
+  }
+
   return {
-    value: Buffer.from(value, "utf8").subarray(0, maxBytes).toString("utf8"),
+    value: buffer.subarray(0, end).toString("utf8"),
     truncated: true,
   };
 };
