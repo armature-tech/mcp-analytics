@@ -8,7 +8,7 @@ import type {
   McpAnalyticsConfig,
   RequestExtra,
 } from "./types.js";
-import { isRecord, mergeRequestExtra } from "./utils.js";
+import { isRecord, mergeRequestExtra, safeResolveExtra } from "./utils.js";
 import { z } from "zod";
 import {
   REQUEST_CAPABILITY_ARGUMENT_DESCRIPTION,
@@ -155,7 +155,7 @@ const wrapOneTool = (
     // so it doubles as an override and an extension point.
     const extra = mergeExtra(
       defaultMastraResolveExtra(mastraContext),
-      resolveExtra?.(mastraContext),
+      safeResolveExtra(resolveExtra, mastraContext),
     );
     return recorder.instrumentToolCall(
       {

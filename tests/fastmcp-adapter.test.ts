@@ -919,3 +919,28 @@ test("fastmcp structural typing: real Tool types round-trip through the wrapper"
   const _sessionType: FastMCPSession | undefined = undefined;
   assert.equal(_sessionType, undefined);
 });
+
+test("fastmcp: a throwing resolveExtra still runs the tool and records the call", async () => {
+  const { events, emit } = collectBatches();
+  let ran = false;
+  const wrapped = withFastmcpAnalytics(
+    {
+      name: "echo",
+      description: "Echo a message.",
+      parameters: z.object({ msg: z.string() }),
+      execute: async (args: { msg: string }) => {
+        ran = true;
+        return `echo:${args.msg}`;
+      },
+    },
+    testOptions(emit, {
+      resolveExtra: () => {
+        throw new Error("resolveExtra blew up");
+      },
+    }),
+  );
+  const result = await execOf(wrapped)({ msg: "hi" }, {});
+  assert.equal(ran, true, "the original execute must still run");
+  assert.equal(result, "echo:hi", "the tool result must be unchanged");
+  assert.ok(events().length >= 1, "a tool_call event must be recorded");
+});

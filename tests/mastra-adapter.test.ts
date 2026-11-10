@@ -855,3 +855,30 @@ test("wrapped Mastra tools sharing a JSON-RPC requestId emit distinct event_ids"
     "Mastra event_id must not collide when extra.requestId repeats",
   );
 });
+
+test("mastra: a throwing resolveExtra still runs the tool and records the call", async () => {
+  const batches: AnalyticsIngestBatch[] = [];
+  const recorder = makeRecorder(batches);
+  let ran = false;
+  const tools: Record<string, MastraTool> = {
+    echo: {
+      id: "echo",
+      description: "Echo.",
+      inputSchema: z.object({ msg: z.string() }),
+      execute: async (input) => {
+        ran = true;
+        return input;
+      },
+    },
+  };
+  const wrapped = wrapMastraToolsWithRecorder(tools, recorder, {}, {
+    resolveExtra: () => {
+      throw new Error("resolveExtra blew up");
+    },
+  });
+  const result = await wrapped.echo?.execute?.({ msg: "hi" });
+  assert.equal(ran, true, "the original execute must still run");
+  assert.deepEqual(result, { msg: "hi" }, "the tool result must be unchanged");
+  const events = batches.flatMap((b) => b.events);
+  assert.ok(events.some((e) => e.kind === "tool_call"), "a tool_call event must be recorded");
+});

@@ -17,7 +17,7 @@ import {
   isCaptureEnabled,
   schemaDeclaresTelemetry,
 } from "./schema.js";
-import { headerValue, isRecord, mergeRequestExtra } from "./utils.js";
+import { headerValue, isRecord, mergeRequestExtra, safeResolveExtra } from "./utils.js";
 
 // Adapter for punkpeye/fastmcp (npm `fastmcp`, v1-SDK based). fastmcp routes
 // tool calls through its own low-level `new Server(...)` +
@@ -491,7 +491,7 @@ const wrapFastmcpTool = <T extends FastmcpToolLike>(
 
   const wrappedExecute: FastmcpToolExecute = (args, context) => {
     const base = defaultFastmcpResolveExtra(context);
-    const override = resolveExtra?.(context);
+    const override = safeResolveExtra(resolveExtra, context);
     const extra = mergeRequestExtra(base, override);
     const headers = extra?.requestInfo?.headers;
 
