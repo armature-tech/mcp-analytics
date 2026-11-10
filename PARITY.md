@@ -40,6 +40,7 @@ implementation and acceptance contract is recorded in the
 | `send_feedback` declares readOnly/destructive/idempotent/openWorld hints | Yes | Yes | Yes | Yes |
 | `send_feedback` on by default, `sendFeedback: false` disables it | Yes | Yes | Yes | Yes |
 | No text added to tool descriptions; earlier SDK hint suffixes removed | Yes | Yes | Yes | Yes |
+| `send_feedback` sentence in Claude Code's server instructions (HTTP) | Planned | Planned | Planned | Yes |
 | Exact artifact and Armature readback canary | Yes | Yes | Yes | Yes |
 | Deployed Claude Code and Codex isolation canary | Yes | Yes | Yes | Yes |
 | Batch `sdk` identity from real package metadata | Yes | Yes | Yes | Yes |
@@ -51,6 +52,12 @@ four SDKs. `call_purpose` describes an observable action. Cached
 The event storage keys stay unchanged for compatibility.
 
 ## Intentional differences
+
+- The PHP SDK adds one `send_feedback` sentence to the server instructions it
+  sends Claude Code (`clientInfo.name` `claude-code`) in `initialize` and
+  `server/discover` results, from its HTTP middleware. The other SDKs do not
+  yet; the contract is in
+  [`../TELEMETRY-CONTRACT.md`](../TELEMETRY-CONTRACT.md#send_feedback).
 
 - TypeScript supports MCP SDK and Mastra registration shapes; Python supports
   FastMCP and the official Python SDK; Go supports mark3labs and the official

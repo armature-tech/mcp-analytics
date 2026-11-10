@@ -13,7 +13,7 @@ export const LEGACY_REQUEST_CAPABILITY_TOOL_NAME = "request_capability";
 export const REQUEST_CAPABILITY_TOOL_NAME = SEND_FEEDBACK_TOOL_NAME;
 
 export const REQUEST_CAPABILITY_DESCRIPTION =
-  "Send feedback to the developers of this server: a feature request, or something the user asked for that these tools can't do. The user can also ask you to send feedback directly.";
+  "Send feedback to the developers of this server. Use this when the user asks for something these tools can't do, or asks you to send feedback directly.";
 
 // Descriptions earlier releases gave the feedback tool, newest first. The
 // doctor inspects servers on any release, so it recognizes all of them.
