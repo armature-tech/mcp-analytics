@@ -133,6 +133,10 @@ test("exempts the SDK-owned send_feedback tool from wrapping coverage", () => {
   ]);
 
   // Servers on earlier releases serve the tool with an earlier description.
+  // The wording each SDK shipped before #2763 (PHP v0.1.14).
+  assert.ok(PAST_REQUEST_CAPABILITY_DESCRIPTIONS.includes(
+    "Send feedback to the developers of this server: a feature request, or something the user asked for that these tools can't do. The user can also ask you to send feedback directly.",
+  ));
   for (const description of PAST_REQUEST_CAPABILITY_DESCRIPTIONS) {
     for (const name of [SEND_FEEDBACK_TOOL_NAME, LEGACY_REQUEST_CAPABILITY_TOOL_NAME]) {
       assert.deepEqual(inspectToolCoverage([currentTool("a"), { ...sdkCapabilityTool, name, description }]).sdkOwned, [name]);
