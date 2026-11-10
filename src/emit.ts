@@ -280,8 +280,17 @@ export const reportEmitError = (
 ) => {
   const onError = config.armature?.onError;
   if (onError) {
-    onError(error, batch);
-    return;
+    // A throwing onError hook must never escape telemetry delivery: on the
+    // background (default) path the rejection is unhandled and crashes the
+    // host whose tool call already succeeded. Fall back to the default warning
+    // so the original failure is still surfaced.
+    try {
+      onError(error, batch);
+      return;
+    } catch (hookError) {
+      // eslint-disable-next-line no-console
+      console.warn("[mcp-analytics] telemetry onError hook threw:", hookError);
+    }
   }
   // eslint-disable-next-line no-console
   console.warn("[mcp-analytics] telemetry emit failed:", error);
